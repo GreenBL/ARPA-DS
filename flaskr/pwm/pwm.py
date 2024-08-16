@@ -3,8 +3,11 @@ from flask import (
     request, session, url_for, jsonify, current_app
 )
 from . import db
+from flask_bcrypt import Bcrypt
 
 bp = Blueprint('pwm', __name__, url_prefix='/pwm')
+bcrypt = Bcrypt()
+
 
 @bp.route('/user', methods=['GET'])
 def user():
@@ -29,6 +32,8 @@ def user():
         finally:        
             cursor.close()
     return jsonify(resp)
+
+
 
 
 @bp.route('/user/<int:user_id>', methods=['GET'])
@@ -109,8 +114,67 @@ def delete_user(user_id):
     return jsonify(resp)
 
 
-@bp.route('/img/<path:filename>')
-def flask_img(filename):
-    return current_app.send_static_file("img/"+filename)
+
+########################################################
+@bp.route('/login', methods=['POST'])
+def login():
+    email = request.json.get('email')
+    password = request.json.get('password')
+    connection = db.getdb()
+    
+    try:
+        cursor = connection.cursor()
+        # Querying the users table
+        cursor.execute("SELECT id, email, password, name FROM users WHERE email = %s", (email,))
+        user = cursor.fetchone()
+        
+        if not user:
+            return jsonify({'status': 'USER_NOT_REGISTERED'})
+        elif bcrypt.check_password_hash(user[2], password):
+            response = {
+                'status': 'SUCCESS',
+                'id': user[0],
+                'email': user[1],
+                'name': user[3]
+            }
+            return jsonify(response)
+        else:
+            return jsonify({'status': 'PSW_ERROR'})
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    
+    finally:
+        cursor.close()
 
 
+    
+
+@bp.route('/signup', methods=['POST'])
+def signup():
+    data = request.json
+    name = data.get('name')
+    surname = data.get('surname')
+    phone_number = data.get('phone_number')
+    date_birth = data.get('date_birth')
+    gender = data.get('gender')
+    email = data.get('email')
+    password = data.get('password')
+
+    connection = db.getdb()
+    try:
+        cursor = connection.cursor()
+
+        # Hash della password
+        hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
+        
+        # Esecuzione della query
+        cursor.execute("INSERT INTO users (name, surname, phone_number, date_birth, gender, email, password) VALUES (%s, %s, %s, %s, %s, %s, %s)", (name, surname, phone_number, date_birth, gender, email, hashed_password))
+        
+        connection.commit()
+        return jsonify({'status': 'SUCCESS'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cursor.close()
+        connection.close()
