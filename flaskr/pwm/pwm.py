@@ -8,6 +8,7 @@ from flask_bcrypt import Bcrypt
 bp = Blueprint('pwm', __name__, url_prefix='/pwm')
 bcrypt = Bcrypt()
 
+'''
 
 @bp.route('/user', methods=['GET'])
 def user():
@@ -112,7 +113,7 @@ def delete_user(user_id):
     finally:
         cursor.close()
     return jsonify(resp)
-
+'''
 
 
 ########################################################
@@ -178,3 +179,80 @@ def signup():
     finally:
         cursor.close()
         connection.close()
+
+
+
+@bp.route('/update_profile/<int:users_id>', methods=['PUT'])
+def update_profile(users_id):
+    data = request.json
+    new_phone_number = data.get('phone_number')
+    new_email = data.get('email')
+    new_password = data.get('password')
+
+    connection = db.getdb()
+    try:
+        cursor = connection.cursor()
+
+        # Controllo che almeno uno dei campi da aggiornare sia fornito
+        if not any([new_phone_number, new_email, new_password]):
+            return jsonify({'error': 'No fields to update'}), 400
+
+        # Costruzione della query dinamica per aggiornare solo i campi forniti
+        update_fields = []
+        update_values = []
+
+        if new_phone_number:
+            update_fields.append("phone_number = %s")
+            update_values.append(new_phone_number)
+
+        if new_email:
+            update_fields.append("email = %s")
+            update_values.append(new_email)
+
+        if new_password:
+            # Hash della nuova password
+            hashed_password = bcrypt.generate_password_hash(new_password).decode('utf-8')
+            update_fields.append("password = %s")
+            update_values.append(hashed_password)
+
+        update_values.append(users_id)
+
+        # Creazione della query di aggiornamento
+        update_query = f"UPDATE users SET {', '.join(update_fields)} WHERE id = %s"
+        
+        # Esecuzione della query
+        cursor.execute(update_query, update_values)
+        
+        connection.commit()
+
+        return jsonify({'status': 'SUCCESS'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cursor.close()
+        connection.close()
+
+
+@bp.route('/delete_user/<int:users_id>', methods=['DELETE'])
+def delete_user(users_id):
+    connection = db.getdb()
+    try:
+        cursor = connection.cursor()
+
+        # Esecuzione della query per cancellare l'utente con l'ID specificato
+        cursor.execute("DELETE FROM users WHERE id = %s", (users_id,))
+        
+        connection.commit()
+
+        # Verifica se l'utente è stato effettivamente cancellato
+        if cursor.rowcount == 0:
+            return jsonify({'error': 'User not found'}), 404
+
+        return jsonify({'status': 'SUCCESS', 'message': f'User with id {users_id} deleted successfully'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cursor.close()
+        connection.close()
+
+
