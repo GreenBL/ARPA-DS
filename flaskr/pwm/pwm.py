@@ -6,6 +6,22 @@ from . import db
 
 bp = Blueprint('pwm', __name__, url_prefix='/pwm')
 
+@bp.route('/test', methods=['GET'])
+def test():
+        resp = [{'ciao': "hello world!"}]
+        print("i received a request")
+        return jsonify(resp)
+
+@bp.route('/users/login', methods=['POST'])
+def login():
+    email = request.json.get('email')
+    password = request.json.get('password')
+    print(email)
+    print(password)
+    resp = []
+    resp.append({'login': 'Login request'})
+    return "132"
+
 @bp.route('/user', methods=['GET'])
 def user():
     if request.method == 'GET':
