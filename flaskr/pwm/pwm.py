@@ -8,115 +8,7 @@ from flask_bcrypt import Bcrypt
 bp = Blueprint('pwm', __name__, url_prefix='/pwm')
 bcrypt = Bcrypt()
 
-'''
 
-@bp.route('/user', methods=['GET'])
-def user():
-    if request.method == 'GET':
-        connection = db.getdb()
-        resp = []
-        try:
-            cursor = connection.cursor(dictionary=True)
-            cursor.execute("SELECT * FROM User")
-
-            users = cursor.fetchall()
-            for user in users:
-                resp.append({'id': user['idUser'],
-                             'username': user['username'], 
-                             'password': user['password'], 
-                             'nome': user['nome'],
-                             'cognome': user['cognome']
-                             })            
-
-        except db.IntegrityError:
-            resp.append({'error': 'Error retrieving users'})
-        finally:        
-            cursor.close()
-    return jsonify(resp)
-
-
-
-
-@bp.route('/user/<int:user_id>', methods=['GET'])
-def get_user(user_id):
-    connection = db.getdb()
-    resp = {}
-    try:
-        cursor = connection.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM User WHERE idUser = %s", (user_id,))
-        user = cursor.fetchone()
-        if user:
-            resp = {'id': user['idUser'],
-                    'username': user['username'], 
-                    'password': user['password'], 
-                    'nome': user['nome'],
-                    'cognome': user['cognome']
-                    }
-        else:
-            resp = {'error': 'User not found'}
-    except db.IntegrityError:
-        resp = {'error': 'Error retrieving user'}
-    finally:
-        cursor.close()
-    return jsonify(resp)
-
-
-@bp.route('/user', methods=['POST'])
-def create_user():
-    username = request.json.get('username')
-    password = request.json.get('password')
-    nome = request.json.get('nome')
-    cognome = request.json.get('cognome')
-    connection = db.getdb()
-    try:
-        cursor = connection.cursor()
-        cursor.execute("INSERT INTO User (username, password, nome, cognome) VALUES (%s, %s, %s, %s)", (username, password, nome, cognome))
-        connection.commit()
-        user_id = cursor.lastrowid
-        resp = {'id': user_id, 'username': username, 'password': password}
-    except db.IntegrityError:
-        resp = {'error': 'Error creating user'}
-    finally:
-        cursor.close()
-    return jsonify(resp)
-
-
-@bp.route('/user/<int:user_id>', methods=['PUT'])
-def update_user(user_id):
-    username = request.json.get('username')
-    password = request.json.get('password')
-    nome = request.json.get('nome')
-    cognome = request.json.get('cognome')
-    connection = db.getdb()
-    try:
-        cursor = connection.cursor()
-        cursor.execute("UPDATE User SET username = %s, password = %s, nome = %s, congnome = %s,WHERE idUser = %s", (username, password, nome, cognome, user_id))
-        connection.commit()
-        resp = {'id': user_id, 'username': username, 'password': password}
-    except db.IntegrityError:
-        resp = {'error': 'Error updating user'}
-    finally:
-        cursor.close()
-    return jsonify(resp)
-
-
-@bp.route('/user/<int:user_id>', methods=['DELETE'])
-def delete_user(user_id):
-    connection = db.getdb()
-    try:
-        cursor = connection.cursor()
-        cursor.execute("DELETE FROM User WHERE idUser = %s", (user_id,))
-        connection.commit()
-        resp = {'message': 'User deleted successfully'}
-    except db.IntegrityError:
-        resp = {'error': 'Error deleting user'}
-    finally:
-        cursor.close()
-    return jsonify(resp)
-'''
-
-
-########################################################
 @bp.route('/login', methods=['POST'])
 def login():
     email = request.json.get('email')
@@ -125,30 +17,39 @@ def login():
     
     try:
         cursor = connection.cursor()
-        # Querying the users table
-        cursor.execute("SELECT id, email, password, name FROM users WHERE email = %s", (email,))
+        # Querying the users table including phone_number and surname
+        cursor.execute("SELECT id, email, password, name, surname, phone_number FROM users WHERE email = %s", (email,))
         user = cursor.fetchone()
         
         if not user:
+            # User not found
             return jsonify({'status': 'USER_NOT_REGISTERED', 'user': None})
         elif bcrypt.check_password_hash(user[2], password):
+            # Successful login
             response = {
                 'status': 'SUCCESS',
                 'user': {
                     'id': user[0],
                     'email': user[1],
-                    'name': user[3] 
+                    'name': user[3],
+                    'surname': user[4],
+                    'phone_number': user[5],
+                   # 'password': user[2] 
                 }
             }
             return jsonify(response)
         else:
+            # Incorrect password
             return jsonify({'status': 'PSW_ERROR', 'user': None})
     
     except Exception as e:
+        # Internal server error
         return jsonify({'status': 'ERROR', 'error': str(e), 'user': None}), 500
     
     finally:
         cursor.close()
+
+
 
 
 @bp.route('/signup', methods=['POST'])
@@ -261,25 +162,30 @@ def update_profile(users_id):
         connection.close()
 
 
+@bp.route('/delete_user', methods=['POST'])
+def delete_user():
+    data = request.get_json()
+    user = data.get('user')
+    
+    if not user:
+        return jsonify({'status': 'ERROR', 'message': 'Nessun utente fornito'}), 400
 
-@bp.route('/delete_user/<int:users_id>', methods=['DELETE'])
-def delete_user(users_id):
+    user_id = user.get('id')
+    if not user_id:
+        return jsonify({'status': 'ERROR', 'message': 'ID utente non fornito'}), 400
+
     connection = db.getdb()
     try:
         cursor = connection.cursor()
-
-        # Esecuzione della query per cancellare l'utente con l'ID specificato
-        cursor.execute("DELETE FROM users WHERE id = %s", (users_id,))
-        
+        cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
         connection.commit()
 
-        # Verifica se l'utente è stato effettivamente cancellato
         if cursor.rowcount == 0:
-            return jsonify({'error': 'User not found'}), 404
+            return jsonify({'status': 'ERROR', 'message': 'Utente non trovato'}), 404
 
-        return jsonify({'status': 'SUCCESS', 'message': f'User with id {users_id} deleted successfully'})
+        return jsonify({'status': 'SUCCESS', 'message': f'Utente con ID {user_id} eliminato con successo'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'status': 'ERROR', 'message': 'Errore durante l\'eliminazione dell\'utente'}), 500
     finally:
         cursor.close()
         connection.close()
