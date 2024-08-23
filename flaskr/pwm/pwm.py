@@ -18,7 +18,7 @@ def login():
     try:
         cursor = connection.cursor()
         # Querying the users table including phone_number and surname
-        cursor.execute("SELECT id, email, password, name, surname, phone_number FROM users WHERE email = %s", (email,))
+        cursor.execute("SELECT id, email, password, name, surname, phone FROM users WHERE email = %s", (email,))
         user = cursor.fetchone()
         
         if not user:
@@ -33,7 +33,7 @@ def login():
                     'email': user[1],
                     'name': user[3],
                     'surname': user[4],
-                    'phone_number': user[5],
+                    'phone': user[5],
                    # 'password': user[2] 
                 }
             }
@@ -56,16 +56,15 @@ def login():
 def signup():
     data = request.json
     
-    # Estrarre i dati dal JSON
-    
+
     name = data.get('name')
     surname = data.get('surname')
-    phone_number = data.get('phone_number')
+    phone = data.get('phone')
     email = data.get('email')
     password = data.get('password')
     
-    # Gestire eventuali campi mancanti
-    if not all([name, surname, phone_number, email, password]):
+   
+    if not all([name, surname, phone, email, password]):
         return jsonify({'error': 'All fields are required'}), 400
     
     connection = db.getdb()
@@ -83,10 +82,22 @@ def signup():
         # Esecuzione della query per inserire l'utente nel database
         cursor.execute(
             """
-            INSERT INTO users (name, surname, phone_number, email, password) 
+            INSERT INTO users (name, surname, phone, email, password) 
             VALUES (%s, %s, %s, %s, %s)
             """,
-            (name, surname, phone_number, email, hashed_password)
+            (name, surname, phone, email, hashed_password)
+        )
+        
+        # Ottieni l'ID dell'utente appena creato
+        user_id = cursor.lastrowid
+        
+        # Inserisci il record nella tabella balance con l'importo di default di 100
+        cursor.execute(
+            """
+            INSERT INTO balance (amount, ref_user) 
+            VALUES (100, %s)
+            """,
+            (user_id,)
         )
         
         connection.commit()
@@ -101,65 +112,6 @@ def signup():
 
 
 
-@bp.route('/update_profile/<int:users_id>', methods=['PUT'])
-def update_profile(users_id):
-    data = request.json
-    new_phone_number = data.get('phone_number')
-    new_email = data.get('email')
-    new_password = data.get('password')
-    new_name = data.get('name')  # New field for first name
-    new_surname = data.get('surname')  # New field for last name
-
-    connection = db.getdb()
-    try:
-        cursor = connection.cursor()
-
-        # Ensure at least one field is provided for update
-        if not any([new_phone_number, new_email, new_password, new_name, new_surname]):
-            return jsonify({'error': 'No fields to update'}), 400
-
-        # Build the dynamic update query based on provided fields
-        update_fields = []
-        update_values = []
-
-        if new_phone_number:
-            update_fields.append("phone_number = %s")
-            update_values.append(new_phone_number)
-
-        if new_email:
-            update_fields.append("email = %s")
-            update_values.append(new_email)
-
-        if new_password:
-            # Hash the new password
-            hashed_password = bcrypt.generate_password_hash(new_password).decode('utf-8')
-            update_fields.append("password = %s")
-            update_values.append(hashed_password)
-
-        if new_name:
-            update_fields.append("name = %s")
-            update_values.append(new_name)
-
-        if new_surname:
-            update_fields.append("surname = %s")
-            update_values.append(new_surname)
-
-        update_values.append(users_id)
-
-        # Create and execute the update query
-        update_query = f"UPDATE users SET {', '.join(update_fields)} WHERE id = %s"
-
-
-        cursor.execute(update_query, update_values)
-        
-        connection.commit()
-
-        return jsonify({'status': 'SUCCESS'})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        cursor.close()
-        connection.close()
 
 
 @bp.route('/delete_user', methods=['POST'])
@@ -189,4 +141,101 @@ def delete_user():
     finally:
         cursor.close()
         connection.close()
+
+
+
+@bp.route('/update_user', methods=['POST'])
+def update_user():
+    data = request.get_json()
+    if not data:
+        return jsonify({'status': 'ERROR', 'message': 'Nessun dato ricevuto'}), 400
+
+    user_id = data.get('id')
+    if not user_id:
+        return jsonify({'status': 'ERROR', 'message': 'ID utente non fornito'}), 400
+
+    new_name = data.get('name')
+    new_surname = data.get('surname')
+    new_phone = data.get('phone')
+
+    connection = db.getdb()
+    try:
+        cursor = connection.cursor()
+
+        # Aggiorna solo i campi forniti
+        update_fields = []
+        update_values = []
+
+        if new_name:
+            update_fields.append("name = %s")
+            update_values.append(new_name)
+        if new_surname:
+            update_fields.append("surname = %s")
+            update_values.append(new_surname)
+        if new_phone:
+            update_fields.append("phone = %s")
+            update_values.append(new_phone)
+
+        if not update_fields:
+            return jsonify({'status': 'ERROR', 'message': 'Nessun campo da aggiornare'}), 400
+
+        # Crea la query dinamica
+        update_query = f"UPDATE users SET {', '.join(update_fields)} WHERE id = %s"
+        update_values.append(user_id)
+
+        cursor.execute(update_query, tuple(update_values))
+        connection.commit()
+
+        if cursor.rowcount == 0:
+            return jsonify({'status': 'ERROR', 'message': 'Utente non trovato'}), 404
+
+        return jsonify({'status': 'SUCCESS', 'message': f'Utente con ID {user_id} aggiornato con successo'})
+    except Exception as e:
+        connection.rollback()
+        return jsonify({'status': 'ERROR', 'message': f'Errore durante l\'aggiornamento dell\'utente: {str(e)}'}), 500
+    finally:
+        cursor.close()
+        connection.close()
+
+
+
+@bp.route('/update_saldo', methods=['POST'])
+def update_saldo():
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data received'}), 400
+
+    user_id = data.get('user_id')
+    importo = data.get('amount')  # Make sure this key matches what is sent
+
+    if not user_id or importo is None:
+        return jsonify({'error': 'User ID and amount are required'}), 400
+
+    try:
+        importo = float(importo)
+    except ValueError:
+        return jsonify({'error': 'Invalid amount value'}), 400
+
+    success = aggiorna_saldo(user_id, importo)
+    if not success:
+        return jsonify({'error': 'Failed to update balance'}), 500
+
+    return jsonify({'message': 'Balance updated successfully'}), 200
+
+def aggiorna_saldo(user_id, importo):
+    try:
+        balance_record = Balance.query.filter_by(ref_user=user_id).first()
+        
+        if balance_record:
+            balance_record.amount += importo
+        else:
+            new_balance = Balance(amount=importo, ref_user=user_id)
+            db.session.add(new_balance)
+
+        db.session.commit()
+        return True
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        print(f"Error updating balance: {e}")
+        return False
 
