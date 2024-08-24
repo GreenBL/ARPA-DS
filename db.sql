@@ -11,9 +11,15 @@ CREATE TABLE users (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(50) NOT NULL,
     surname VARCHAR(50) NOT NULL,
-    phone_number VARCHAR(15) NOT NULL,
-    date_birth DATE NOT NULL,
-    gender ENUM('maschio', 'femmina', 'LGBTQ+') NOT NULL,
+    phone VARCHAR(15) NOT NULL,
     email VARCHAR(50) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL 
+);
+
+
+CREATE TABLE balance (
+    wallet_id INT AUTO_INCREMENT PRIMARY KEY,
+    amount DECIMAL(10, 2) NOT NULL,
+    ref_user INT UNIQUE, 
+    FOREIGN KEY (ref_user) REFERENCES users(id) 
 );
