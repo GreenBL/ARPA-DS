@@ -50,68 +50,70 @@ def login():
         cursor.close()
 
 
-
-
 @bp.route('/signup', methods=['POST'])
 def signup():
     data = request.json
-    
 
+    # Extract fields from the request data
     name = data.get('name')
     surname = data.get('surname')
-    phone = data.get('phone')
+    phone = data.get('phone_number')  # Ensure this matches the request payload
     email = data.get('email')
     password = data.get('password')
-    
-   
+
+    # Log the received data for debugging
+    current_app.logger.info(f"Received data: {data}")
+
+    # Check if all required fields are present
     if not all([name, surname, phone, email, password]):
         return jsonify({'error': 'All fields are required'}), 400
-    
-    connection = db.getdb()
-    try:
-        cursor = connection.cursor()
 
-        # Verifica se l'email è già in uso
-        cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
+    connection = db.getdb()  # Adjusted to the actual function name
+    cursor = connection.cursor()
+
+    try:
+        # Check if the email is already in use
+        query = "SELECT id FROM users WHERE email = ?"
+        current_app.logger.info(f"Executing query: {query} with params: {email}")
+        cursor.execute(query, (email,))
         if cursor.fetchone() is not None:
             return jsonify({'error': 'Email already in use'}), 400
 
-        # Hash della password
+        # Hash the password
         hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
-        
-        # Esecuzione della query per inserire l'utente nel database
-        cursor.execute(
-            """
+
+        # Insert the user into the database
+        query = """
             INSERT INTO users (name, surname, phone, email, password) 
-            VALUES (%s, %s, %s, %s, %s)
-            """,
-            (name, surname, phone, email, hashed_password)
-        )
-        
-        # Ottieni l'ID dell'utente appena creato
+            VALUES (?, ?, ?, ?, ?)
+        """
+        params = (name, surname, phone, email, hashed_password)
+        current_app.logger.info(f"Executing query: {query} with params: {params}")
+        cursor.execute(query, params)
+
+        # Get the user ID of the newly created user
         user_id = cursor.lastrowid
-        
-        # Inserisci il record nella tabella balance con l'importo di default di 100
-        cursor.execute(
-            """
+
+        # Insert a record into the balance table with a default amount
+        query = """
             INSERT INTO balance (amount, ref_user) 
-            VALUES (100, %s)
-            """,
-            (user_id,)
-        )
-        
+            VALUES (?, ?)
+        """
+        params = (100, user_id)
+        current_app.logger.info(f"Executing query: {query} with params: {params}")
+        cursor.execute(query, params)
+
         connection.commit()
         return jsonify({'status': 'SUCCESS'})
-    
+
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    
+        # Log the error for debugging
+        current_app.logger.error(f"Error during sign up: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
     finally:
         cursor.close()
         connection.close()
-
-
-
 
 
 @bp.route('/delete_user', methods=['POST'])
