@@ -73,7 +73,7 @@ def signup():
 
     try:
         # Check if the email is already in use
-        query = "SELECT id FROM users WHERE email = ?"
+        query = "SELECT id FROM users WHERE email = %s"
         current_app.logger.info(f"Executing query: {query} with params: {email}")
         cursor.execute(query, (email,))
         if cursor.fetchone() is not None:
