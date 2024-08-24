@@ -14,18 +14,13 @@ def login():
     email = request.json.get('email')
     password = request.json.get('password')
     connection = db.getdb()
-    
     try:
         cursor = connection.cursor()
-        # Querying the users table including phone_number and surname
         cursor.execute("SELECT id, email, password, name, surname, phone FROM users WHERE email = %s", (email,))
         user = cursor.fetchone()
-        
-        if not user:
-            # User not found
+        if not user: 
             return jsonify({'status': 'USER_NOT_REGISTERED', 'user': None})
         elif bcrypt.check_password_hash(user[2], password):
-            # Successful login
             response = {
                 'status': 'SUCCESS',
                 'user': {
@@ -33,19 +28,14 @@ def login():
                     'email': user[1],
                     'name': user[3],
                     'surname': user[4],
-                    'phone': user[5],
-                   # 'password': user[2] 
+                    'phone': user[5],  
                 }
             }
             return jsonify(response)
-        else:
-            # Incorrect password
+        else:      
             return jsonify({'status': 'PSW_ERROR', 'user': None})
-    
     except Exception as e:
-        # Internal server error
-        return jsonify({'status': 'ERROR', 'error': str(e), 'user': None}), 500
-    
+        return jsonify({'status': 'ERROR', 'error': str(e), 'user': None})
     finally:
         cursor.close()
 
@@ -54,35 +44,24 @@ def login():
 def signup():
     data = request.json
 
-    # Extract fields from the request data
     name = data.get('name')
     surname = data.get('surname')
-    phone = data.get('phone_number')  # Ensure this matches the request payload
+    phone = data.get('phone_number') 
     email = data.get('email')
     password = data.get('password')
 
-    # Log the received data for debugging
     current_app.logger.info(f"Received data: {data}")
 
-    # Check if all required fields are present
     if not all([name, surname, phone, email, password]):
-        return jsonify({'error': 'All fields are required'}), 400
-
-    connection = db.getdb()  # Adjusted to the actual function name
+        return jsonify({'error': 'All fields are required'})
+    connection = db.getdb()
     cursor = connection.cursor()
-
     try:
-        # Check if the email is already in use
-        query = "SELECT id FROM users WHERE email = %s"
-        current_app.logger.info(f"Executing query: {query} with params: {email}")
-        cursor.execute(query, (email,))
+        cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
         if cursor.fetchone() is not None:
-            return jsonify({'error': 'Email already in use'}), 400
+            return jsonify({'error': 'Email already in use'})
 
-        # Hash the password
         hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
-
-        # Insert the user into the database
         query = """
             INSERT INTO users (name, surname, phone, email, password) 
             VALUES (?, ?, ?, ?, ?)
@@ -91,10 +70,8 @@ def signup():
         current_app.logger.info(f"Executing query: {query} with params: {params}")
         cursor.execute(query, params)
 
-        # Get the user ID of the newly created user
         user_id = cursor.lastrowid
 
-        # Insert a record into the balance table with a default amount
         query = """
             INSERT INTO balance (amount, ref_user) 
             VALUES (?, ?)
@@ -107,10 +84,8 @@ def signup():
         return jsonify({'status': 'SUCCESS'})
 
     except Exception as e:
-        # Log the error for debugging
         current_app.logger.error(f"Error during sign up: {e}")
-        return jsonify({'error': 'Internal server error'}), 500
-
+        return jsonify({'error': 'Internal server error'})
     finally:
         cursor.close()
         connection.close()
@@ -122,11 +97,11 @@ def delete_user():
     user = data.get('user')
     
     if not user:
-        return jsonify({'status': 'ERROR', 'message': 'Nessun utente fornito'}), 400
+        return jsonify({'status': 'ERROR', 'message': 'Nessun utente fornito'})
 
     user_id = user.get('id')
     if not user_id:
-        return jsonify({'status': 'ERROR', 'message': 'ID utente non fornito'}), 400
+        return jsonify({'status': 'ERROR', 'message': 'ID utente non fornito'})
 
     connection = db.getdb()
     try:
@@ -135,11 +110,11 @@ def delete_user():
         connection.commit()
 
         if cursor.rowcount == 0:
-            return jsonify({'status': 'ERROR', 'message': 'Utente non trovato'}), 404
+            return jsonify({'status': 'ERROR', 'message': 'Utente non trovato'})
 
         return jsonify({'status': 'SUCCESS', 'message': f'Utente con ID {user_id} eliminato con successo'})
     except Exception as e:
-        return jsonify({'status': 'ERROR', 'message': 'Errore durante l\'eliminazione dell\'utente'}), 500
+        return jsonify({'status': 'ERROR', 'message': 'Errore durante l\'eliminazione dell\'utente'})
     finally:
         cursor.close()
         connection.close()
@@ -150,11 +125,11 @@ def delete_user():
 def update_user():
     data = request.get_json()
     if not data:
-        return jsonify({'status': 'ERROR', 'message': 'Nessun dato ricevuto'}), 400
+        return jsonify({'status': 'ERROR', 'message': 'Nessun dato ricevuto'})
 
     user_id = data.get('id')
     if not user_id:
-        return jsonify({'status': 'ERROR', 'message': 'ID utente non fornito'}), 400
+        return jsonify({'status': 'ERROR', 'message': 'ID utente non fornito'})
 
     new_name = data.get('name')
     new_surname = data.get('surname')
@@ -164,7 +139,6 @@ def update_user():
     try:
         cursor = connection.cursor()
 
-        # Aggiorna solo i campi forniti
         update_fields = []
         update_values = []
 
@@ -179,9 +153,8 @@ def update_user():
             update_values.append(new_phone)
 
         if not update_fields:
-            return jsonify({'status': 'ERROR', 'message': 'Nessun campo da aggiornare'}), 400
-
-        # Crea la query dinamica
+            return jsonify({'status': 'ERROR', 'message': 'Nessun campo da aggiornare'})
+        
         update_query = f"UPDATE users SET {', '.join(update_fields)} WHERE id = %s"
         update_values.append(user_id)
 
@@ -189,12 +162,12 @@ def update_user():
         connection.commit()
 
         if cursor.rowcount == 0:
-            return jsonify({'status': 'ERROR', 'message': 'Utente non trovato'}), 404
+            return jsonify({'status': 'ERROR', 'message': 'Utente non trovato'})
 
         return jsonify({'status': 'SUCCESS', 'message': f'Utente con ID {user_id} aggiornato con successo'})
     except Exception as e:
         connection.rollback()
-        return jsonify({'status': 'ERROR', 'message': f'Errore durante l\'aggiornamento dell\'utente: {str(e)}'}), 500
+        return jsonify({'status': 'ERROR', 'message': f'Errore durante l\'aggiornamento dell\'utente: {str(e)}'})
     finally:
         cursor.close()
         connection.close()
@@ -205,24 +178,24 @@ def update_user():
 def update_saldo():
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data received'}), 400
+        return jsonify({'error': 'No data received'})
 
     user_id = data.get('user_id')
-    importo = data.get('amount')  # Make sure this key matches what is sent
+    importo = data.get('amount') 
 
     if not user_id or importo is None:
-        return jsonify({'error': 'User ID and amount are required'}), 400
+        return jsonify({'error': 'User ID and amount are required'})
 
     try:
         importo = float(importo)
     except ValueError:
-        return jsonify({'error': 'Invalid amount value'}), 400
+        return jsonify({'error': 'Invalid amount value'})
 
     success = aggiorna_saldo(user_id, importo)
     if not success:
-        return jsonify({'error': 'Failed to update balance'}), 500
+        return jsonify({'error': 'Failed to update balance'})
 
-    return jsonify({'message': 'Balance updated successfully'}), 200
+    return jsonify({'message': 'Balance updated successfully'})
 
 def aggiorna_saldo(user_id, importo):
     try:
