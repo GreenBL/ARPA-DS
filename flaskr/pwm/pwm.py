@@ -51,7 +51,7 @@ def signup():
 
     name = data.get('name')
     surname = data.get('surname')
-    phone = data.get('phone_number') 
+    phone = data.get('phone') 
     email = data.get('email')
     password = data.get('password')
 
@@ -72,10 +72,9 @@ def signup():
         hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
         query = """
             INSERT INTO users (name, surname, phone, email, password) 
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s)
         """
         params = (name, surname, phone, email, hashed_password)
-        current_app.logger.info(f"Executing query: {query} with params: {params}")
         cursor.execute(query, params)
 
         user_id = cursor.lastrowid  # Get the ID of the newly inserted user
@@ -83,10 +82,9 @@ def signup():
         # Insert a default balance for the new user
         query = """
             INSERT INTO balance (amount, ref_user) 
-            VALUES (?, ?)
+            VALUES (%s, %s)
         """
         params = (100, user_id)
-        current_app.logger.info(f"Executing query: {query} with params: {params}")
         cursor.execute(query, params)
 
         connection.commit()  # Commit the transaction
@@ -190,7 +188,7 @@ def update_user():
         cursor.close()
         connection.close()
 
-
+'''
 @bp.route('/update_saldo', methods=['POST'])
 def update_saldo():
     data = request.get_json()
@@ -236,3 +234,4 @@ def aggiorna_saldo(user_id, importo):
         db.session.rollback()  # Rollback in case of error
         print(f"Error updating balance: {e}")
         return False
+'''
