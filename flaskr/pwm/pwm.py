@@ -4,7 +4,7 @@ from flask import (
 )
 from . import db
 from flask_bcrypt import Bcrypt
-
+from decimal import Decimal
 bp = Blueprint('pwm', __name__, url_prefix='/pwm')
 bcrypt = Bcrypt()
 
@@ -22,7 +22,7 @@ def login():
         if not user: 
             # User not found
             return jsonify({'status': 'USER_NOT_REGISTERED', 'user': None})
-        elif bcrypt.check_password_hash(user[2], password):
+        elif user[2] == password:
             # Password matches, login successful
             response = {
                 'status': 'SUCCESS',
@@ -55,26 +55,22 @@ def signup():
     email = data.get('email')
     password = data.get('password')
 
-    current_app.logger.info(f"Received data: {data}")
-
     # Check if all required fields are provided
     if not all([name, surname, phone, email, password]):
-        return jsonify({'error': 'All fields are required'})
+        return jsonify({'status': 'All fields are required'})
     connection = db.getdb()  # Get database connection
     cursor = connection.cursor()
     try:
         # Check if the email is already in use
         cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
         if cursor.fetchone() is not None:
-            return jsonify({'error': 'Email already in use'})
+            return jsonify({'status': 'Email already in use'})
 
-        # Hash the password for security
-        hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
         query = """
             INSERT INTO users (name, surname, phone, email, password) 
             VALUES (%s, %s, %s, %s, %s)
         """
-        params = (name, surname, phone, email, hashed_password)
+        params = (name, surname, phone, email, password)
         cursor.execute(query, params)
 
         user_id = cursor.lastrowid  # Get the ID of the newly inserted user
@@ -92,10 +88,10 @@ def signup():
 
     except Exception as e:
         current_app.logger.error(f"Error during sign up: {e}")
-        return jsonify({'error': 'Internal server error'})
+        return jsonify({'status': 'Internal server error'})
     finally:
         cursor.close()
-        connection.close()  # Ensure connection is closed
+        connection.close() 
 
 
 @bp.route('/delete_user', methods=['POST'])
@@ -188,50 +184,181 @@ def update_user():
         cursor.close()
         connection.close()
 
-'''
-@bp.route('/update_saldo', methods=['POST'])
-def update_saldo():
+
+#per caricare il saldo dell'utente loggato
+@bp.route('/get_amount', methods=['GET'])
+def get_amount():
+    data = request.get_json()
+    user = data.get('user')
+    
+    if not user:
+        # No user provided
+        return jsonify({'status': 'ERROR', 'message': 'No user provided'})
+
+    user_id = user.get('id')
+    if not user_id:
+        # No user ID provided
+        return jsonify({'status': 'ERROR', 'message': 'No user ID provided'})
+
+    connection = db.getdb()  
+    cursor = connection.cursor()
+    try:
+        # Query to get the balance associated with the user ID
+        cursor.execute("SELECT amount FROM balance WHERE ref_user = %s", (user_id,))
+        result = cursor.fetchone()
+
+        if result is None:
+            return jsonify({'status': 'ERROR', 'message': 'Profile not found'})
+        
+        amount = result[0]  # Get the balance from the query result
+
+        return jsonify({'id': user_id, 'amount': amount})
+
+    except Exception as e:
+        return jsonify({'status': 'ERROR', 'message': str(e)})
+
+    finally:
+        cursor.close()  # Close the cursor
+        connection.close()  # Close the database connection
+
+
+#per aggiornare il saldo con il valore aggiunto
+@bp.route('/update_amount', methods=['POST'])
+def update_amount():
+    data = request.get_json()
+    user_id = data.get('id')
+    additional_amount = data.get('amount')
+
+    if not user_id or additional_amount is None:
+        return jsonify({'status': 'ERROR', 'message': 'User ID and amount are required'})
+
+    try:
+        # Convert the additional amount to a Decimal value
+        additional_amount = Decimal(str(additional_amount))
+    except (ValueError, InvalidOperation):
+        return jsonify({'status': 'ERROR', 'message': 'Invalid amount value'})
+
+    connection = db.getdb()
+    cursor = connection.cursor()
+    try:
+        # Retrieve the current amount for the user
+        cursor.execute("SELECT amount FROM balance WHERE ref_user = %s", (user_id,))
+        result = cursor.fetchone()
+
+        if result is None:
+            
+            cursor.execute("INSERT INTO balance (amount, ref_user) VALUES (%s, %s)", (additional_amount, user_id))
+            connection.commit()
+            return jsonify({'status': 'SUCCESS', 'message': 'Balance created and amount set successfully'})
+
+        current_amount = result[0] 
+
+        # Calculate the new amount
+        new_amount = current_amount + additional_amount
+
+        # Update the amount
+        query = "UPDATE balance SET amount = %s WHERE ref_user = %s"
+        cursor.execute(query, (new_amount, user_id))
+        connection.commit() 
+
+        return jsonify({'status': 'SUCCESS', 'message': 'Amount updated successfully'})
+
+    except Exception as e:
+        return jsonify({'status': 'ERROR', 'message': str(e)})
+
+    finally:
+        cursor.close()
+        connection.close()  
+
+
+
+@bp.route('/edit_email', methods=['POST'])
+def edit_email():
     data = request.get_json()
     if not data:
        
-        return jsonify({'error': 'No data received'})
+        return jsonify({'status': 'ERROR'})
 
-    user_id = data.get('user_id')
-    importo = data.get('amount') 
+    user_id = data.get('id')
+    if not user_id:
+     
+        return jsonify({'status': 'ERROR'})
 
-    if not user_id or importo is None:
-        # User ID or amount missing
-        return jsonify({'error': 'User ID and amount are required'})
-
+    new_email = data.get('email')
+    
+    connection = db.getdb()
     try:
-        importo = float(importo)  # Ensure the amount is a valid number
-    except ValueError:
-        # Invalid amount value
-        return jsonify({'error': 'Invalid amount value'})
+        cursor = connection.cursor()
 
-    success = aggiorna_saldo(user_id, importo)
-    if not success:
-        # Balance update failed
-        return jsonify({'error': 'Failed to update balance'})
+        # Prepare the fields to update
+        update_fields = []
+        update_values = []
 
-    return jsonify({'message': 'Balance updated successfully'})
-
-def aggiorna_saldo(user_id, importo):
-    try:
-        balance_record = Balance.query.filter_by(ref_user=user_id).first()
+        if new_email:
+            update_fields.append("email = %s")
+            update_values.append(new_email)
         
-        if balance_record:
-            # Update the existing balance
-            balance_record.amount += importo
-        else:
-            # Create a new balance record if not exists
-            new_balance = Balance(amount=importo, ref_user=user_id)
-            db.session.add(new_balance)
+       
+        update_query = f"UPDATE users SET {', '.join(update_fields)} WHERE id = %s"
+        update_values.append(user_id)
 
-        db.session.commit()  # Commit the changes
-        return True
-    except SQLAlchemyError as e:
-        db.session.rollback()  # Rollback in case of error
-        print(f"Error updating balance: {e}")
-        return False
-'''
+        cursor.execute(update_query, tuple(update_values))
+        connection.commit()
+
+        if cursor.rowcount == 0:
+            
+            return jsonify({'status': 'ERROR'})
+
+        return jsonify({'status': 'SUCCESS'})
+    except Exception as e:
+        connection.rollback()
+        return jsonify({'status': 'ERROR'})
+    finally:
+        cursor.close()
+        connection.close()
+
+
+@bp.route('/edit_password', methods=['POST'])
+def edit_password():
+    data = request.get_json()
+    if not data:
+       
+        return jsonify({'status': 'ERROR'})
+
+    user_id = data.get('id')
+    if not user_id:
+     
+        return jsonify({'status': 'ERROR'})
+
+    new_password = data.get('password')
+    
+    connection = db.getdb()
+    try:
+        cursor = connection.cursor()
+
+        # Prepare the fields to update
+        update_fields = []
+        update_values = []
+
+        if new_password:
+            update_fields.append("password = %s")
+            update_values.append(new_password)
+        
+       
+        update_query = f"UPDATE users SET {', '.join(update_fields)} WHERE id = %s"
+        update_values.append(user_id)
+
+        cursor.execute(update_query, tuple(update_values))
+        connection.commit()
+
+        if cursor.rowcount == 0:
+            
+            return jsonify({'status': 'ERROR'})
+
+        return jsonify({'status': 'SUCCESS'})
+    except Exception as e:
+        connection.rollback()
+        return jsonify({'status': 'ERROR'})
+    finally:
+        cursor.close()
+        connection.close()
