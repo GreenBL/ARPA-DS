@@ -386,3 +386,41 @@ def load_images():
         # Close the connection
         cursor.close()
         connection.close()
+
+
+@bp.route('/associate_image', methods=['POST'])
+def associate_image():
+    try:
+        # Get data from the request
+        data = request.get_json()
+        user_id = data.get('user_id')
+        image_id = data.get('image_id')
+
+        if not user_id or not image_id:
+            return jsonify({'status': 'ERROR'})
+
+        connection = db.getdb()  # Connect to the database
+        cursor = connection.cursor()
+
+        # Check if the user already has an image associated
+        cursor.execute("SELECT * FROM user_images WHERE user_id = %s", (user_id,))
+        association = cursor.fetchone()
+
+        if association:
+            # If the association exists, update the image associated with the user
+            cursor.execute("UPDATE user_images SET image_id = %s WHERE user_id = %s", (image_id, user_id))
+        else:
+            # If the association does not exist, insert a new row
+            cursor.execute("INSERT INTO user_images (user_id, image_id) VALUES (%s, %s)", (user_id, image_id))
+        
+        connection.commit()
+
+        return jsonify({'status': 'SUCCESS'})
+
+    except Exception as e:
+        connection.rollback()
+        return jsonify({'status': 'ERROR', 'message': str(e)})
+
+    finally:
+        cursor.close()
+        connection.close()
