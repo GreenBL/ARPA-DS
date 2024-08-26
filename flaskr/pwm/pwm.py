@@ -362,3 +362,27 @@ def edit_password():
     finally:
         cursor.close()
         connection.close()
+
+@bp.route('/load_images', methods=['GET'])
+def load_images():
+    try:
+        connection = db.getdb()  # Connect to the database
+        cursor = connection.cursor(dictionary=True)
+
+        # Query to retrieve all images
+        cursor.execute("SELECT id, image_url FROM images")
+        images = cursor.fetchall()
+
+        # Format the result
+        images_list = [{"id": img["id"], "url": img["image_url"]} for img in images]
+
+        return jsonify({'status': 'SUCCESS', 'images': images_list})
+
+    except Exception as e:
+        # Error handling
+        return jsonify({'status': 'ERROR', 'message': str(e)})
+
+    finally:
+        # Close the connection
+        cursor.close()
+        connection.close()
