@@ -5,6 +5,7 @@ from flask import (
 from . import db
 from flask_bcrypt import Bcrypt
 from decimal import Decimal
+import datetime 
 bp = Blueprint('pwm', __name__, url_prefix='/pwm')
 bcrypt = Bcrypt()
 
@@ -419,6 +420,90 @@ def associate_image():
 
     except Exception as e:
         connection.rollback()
+        return jsonify({'status': 'ERROR', 'message': str(e)})
+
+    finally:
+        cursor.close()
+        connection.close()
+
+
+
+@bp.route('/load_films', methods=['GET'])
+def load_films():
+    try:
+        connection = db.getdb()  # Connessione al database
+        cursor = connection.cursor(dictionary=True)
+
+        # Query per ottenere tutti i film
+        cursor.execute("SELECT * FROM film")
+        films = cursor.fetchall()
+
+        # Formattazione del risultato
+        films_list = [
+            {
+                "id": film["id"],
+                "title": film["title"],
+                "categories": film["categories"],
+                "plot": film["plot"],
+                "duration": film["duration"],
+                "url": film["url"],
+                "producer": film["producer"],
+                "release_date": film["release_date"]
+            }
+            for film in films
+        ]
+
+        return jsonify({'status': 'SUCCESS', 'films': films_list})
+
+    except Exception as e:
+        # Gestione degli errori
+        return jsonify({'status': 'ERROR', 'message': str(e)})
+
+    finally:
+        # Chiusura della connessione
+        cursor.close()
+        connection.close()
+
+
+
+@bp.route('/movie_of_the_week', methods=['GET'])
+def movie_of_the_week():
+    try:
+        
+        connection = db.getdb()
+        cursor = connection.cursor(dictionary=True)
+
+        # Calculate the current week (from Monday to Sunday)
+        today = datetime.date.today()
+        start_of_week = today - datetime.timedelta(days=today.weekday())  # Monday of the current week
+        end_of_week = start_of_week + datetime.timedelta(days=6)  # Sunday of the current week
+
+        # Query to get movies with release_date in the current week
+        query = """
+            SELECT * FROM film
+            WHERE release_date BETWEEN %s AND %s
+        """
+        cursor.execute(query, (start_of_week, end_of_week))
+        films = cursor.fetchall()
+
+       
+        films_list = [
+            {
+                "id": film["id"],
+                "title": film["title"],
+                "categories": film["categories"],
+                "plot": film["plot"],
+                "duration": film["duration"],
+                "url": film["url"],
+                "producer": film["producer"],
+                "release_date": film["release_date"].isoformat()  # Convert to ISO 8601 string
+            }
+            for film in films
+        ]
+
+        return jsonify({'status': 'SUCCESS', 'films': films_list})
+
+    except Exception as e:
         return jsonify({'status': 'ERROR', 'message': str(e)})
 
     finally:
