@@ -219,8 +219,8 @@ def get_amount():
         return jsonify({'status': 'ERROR', 'message': str(e)})
 
     finally:
-        cursor.close()  # Close the cursor
-        connection.close()  # Close the database connection
+        cursor.close()  
+        connection.close() 
 
 
 #per aggiornare il saldo con il valore aggiunto
@@ -509,3 +509,137 @@ def movie_of_the_week():
     finally:
         cursor.close()
         connection.close()
+
+
+@bp.route('/select_seats', methods=['POST'])
+def select_seats():
+    data = request.get_json()
+    
+    user_id = data.get('user_id')
+    film_id = data.get('film_id')
+    theater_id = data.get('theater_id')
+    screening_date = data.get('screening_date')
+    screening_time = data.get('screening_time')
+    selected_seats = data.get('selected_seats')  # List of seat codes
+    
+    if not all([user_id, film_id, theater_id, screening_date, screening_time, selected_seats]):
+        return jsonify({'status': 'ERROR', 'message': 'Missing required data'}), 400
+
+    connection = db.getdb()
+    cursor = connection.cursor(dictionary=True)
+    
+    try:
+        # Check if the theater is full
+        cursor.execute("SELECT seat_count, available, is_full FROM theater WHERE id = %s", (theater_id,))
+        theater = cursor.fetchone()
+        if not theater:
+            return jsonify({'status': 'ERROR', 'message': 'Theater not found'}), 404
+
+        if theater['is_full']:
+            return jsonify({'status': 'ERROR', 'message': 'Theater is fully booked'}), 400
+
+        # Retrieve seat IDs based on seat codes
+        seat_placeholders = ', '.join(['%s'] * len(selected_seats))
+        cursor.execute(f"""
+            SELECT id, seat_code FROM seat 
+            WHERE seat_code IN ({seat_placeholders}) AND theater_id = %s
+        """, (*selected_seats, theater_id))
+        seat_ids = {row['seat_code']: row['id'] for row in cursor.fetchall()}
+
+        # Check if any selected seats are already occupied
+        seat_ids_placeholder = ', '.join(['%s'] * len(seat_ids))
+        cursor.execute(f"""
+            SELECT seat_id FROM seat_status 
+            WHERE seat_id IN ({seat_ids_placeholder}) AND is_occupied = TRUE
+            AND theater_id = %s AND screening_date = %s AND screening_time = %s
+        """, (*seat_ids.values(), theater_id, screening_date, screening_time))
+        occupied_seat_ids = {row['seat_id'] for row in cursor.fetchall()}
+
+        if occupied_seat_ids:
+            return jsonify({'status': 'ERROR', 'message': 'Some seats are already occupied'}), 400
+
+        # Update seat_status table to mark seats as occupied
+        seat_status_updates = [(seat_id, theater_id, screening_date, screening_time) for seat_id in seat_ids.values()]
+        cursor.executemany("""
+            INSERT INTO seat_status (seat_id, theater_id, screening_date, screening_time, is_occupied)
+            VALUES (%s, %s, %s, %s, TRUE)
+            ON DUPLICATE KEY UPDATE is_occupied = TRUE
+        """, seat_status_updates)
+
+        # Update theater's available seats
+        cursor.execute("UPDATE theater SET available = available - %s WHERE id = %s", (len(selected_seats), theater_id))
+
+        # Check if theater is now full
+        cursor.execute("SELECT available FROM theater WHERE id = %s", (theater_id,))
+        available_seats = cursor.fetchone()['available']
+
+        if available_seats == 0:
+            cursor.execute("UPDATE theater SET is_full = TRUE WHERE id = %s", (theater_id,))
+
+        # Record the purchase
+        cursor.execute("""
+            INSERT INTO purchases (user_id, film_id, theater_id, screening_date, screening_time, seat_count, seats)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (user_id, film_id, theater_id, screening_date, screening_time, len(selected_seats), ','.join(selected_seats)))
+
+        connection.commit()
+        
+        return jsonify({'status': 'SUCCESS', 'message': 'Booking successful'}), 200
+
+    except Exception as e:
+        connection.rollback()
+        return jsonify({'status': 'ERROR', 'message': str(e)}), 500
+
+    finally:
+        cursor.close()
+        connection.close()
+
+'''
+NON PRENDERE IN CONSIDERAZIONE
+import random
+import datetime
+from flask import jsonify
+
+def save_random_screening_dates(film_id, theater_id):
+    connection = db.getdb()
+    cursor = connection.cursor(dictionary=True)
+
+    try:
+        # Ottieni la data corrente e calcola l'inizio e la fine della settimana
+        today = datetime.date.today()
+        start_of_week = today - datetime.timedelta(days=today.weekday())
+        end_of_week = start_of_week + datetime.timedelta(days=6)
+
+        # Genera 3 date casuali all'interno della settimana corrente
+        random_dates = random.sample([start_of_week + datetime.timedelta(days=i) for i in range(7)], 3)
+
+        # Inserisci i giorni casuali nella tabella screening
+        for random_date in random_dates:
+            cursor.execute("""
+                INSERT INTO screening (film_id, theater_id, scrining_start, date) 
+                VALUES (%s, %s, %s, %s)
+            """, (film_id, theater_id, '18:00:00', random_date))
+        
+        connection.commit()
+        return jsonify({'status': 'SUCCESS', 'message': 'Random screening dates saved successfully'})
+
+    except Exception as e:
+        connection.rollback()
+        return jsonify({'status': 'ERROR', 'message': str(e)})
+
+    finally:
+        cursor.close()
+        connection.close()
+
+
+@bp.route('/save_random_dates', methods=['POST'])
+def save_dates():
+    data = request.get_json()
+    film_id = data.get('film_id')
+    theater_id = data.get('theater_id')
+
+    if not film_id or not theater_id:
+        return jsonify({'status': 'ERROR', 'message': 'Film ID and Theater ID are required'})
+
+    return save_random_screening_dates(film_id, theater_id)
+'''
