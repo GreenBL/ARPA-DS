@@ -720,6 +720,76 @@ def get_tickets():
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 
 
+
+
+
+@bp.route('/buy_tickets', methods=['POST'])
+def buy_tickets():
+    data = request.get_json()
+    user_id = data.get('user_id')
+    
+    if not user_id:
+        return jsonify({'status': 'ERROR', 'message': 'User ID is required'})
+    
+    connection = db.getdb()
+    cursor = connection.cursor()
+
+    try:
+        # Retrieve the total seat count for the user from the purchases table
+        cursor.execute("""
+            SELECT SUM(seat_count) 
+            FROM purchases 
+            WHERE user_id = %s
+            AND screening_date = CURDATE()  -- Assuming the current date is used for the screening
+        """, (user_id,))
+        
+        result = cursor.fetchone()
+        
+        if result is None:
+            return jsonify({'status': 'ERROR', 'message': 'No purchase record found for the user for today'})
+        
+        seat_count_total = result[0] or 0  # Default to 0 if the result is None
+        
+        # Set the ticket price
+        ticket_price = Decimal('8.00')
+        total_price = ticket_price * seat_count_total
+
+        # Retrieve the current amount for the user
+        cursor.execute("SELECT amount FROM balance WHERE ref_user = %s", (user_id,))
+        result = cursor.fetchone()
+
+        if result is None:
+            return jsonify({'status': 'ERROR', 'message': 'No balance record found for the user'})
+
+        current_amount = Decimal(result[0])
+
+        if total_price > current_amount:
+            return jsonify({'status': 'ERROR', 'message': 'Insufficient balance'})
+
+        # Update the balance
+        new_amount = current_amount - total_price
+        cursor.execute("UPDATE balance SET amount = %s WHERE ref_user = %s", (new_amount, user_id))
+        connection.commit()
+
+        return jsonify({'status': 'SUCCESS', 'message': 'Purchase successful, balance updated'})
+
+    except ValueError as e:
+        return jsonify({'status': 'ERROR', 'message': 'Error in processing the transaction: ' + str(e)})
+    
+    except Exception as e:
+        return jsonify({'status': 'ERROR', 'message': 'An error occurred: ' + str(e)})
+
+    finally:
+        cursor.close()
+        connection.close()
+
+
+
+
+
+
+
+
 '''
 NON PRENDERE IN CONSIDERAZIONE
 import random
