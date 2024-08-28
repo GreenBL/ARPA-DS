@@ -1,11 +1,13 @@
 from flask import (
-    Blueprint, flash, g, redirect, render_template, 
+    Blueprint, Flask, g, redirect, render_template, 
     request, session, url_for, jsonify, current_app
 )
 from . import db
+import qrcode
+import io
 from flask_bcrypt import Bcrypt
 from decimal import Decimal
-import datetime 
+from datetime import timedelta, datetime 
 bp = Blueprint('pwm', __name__, url_prefix='/pwm')
 bcrypt = Bcrypt()
 
@@ -431,14 +433,14 @@ def associate_image():
 @bp.route('/load_films', methods=['GET'])
 def load_films():
     try:
-        connection = db.getdb()  # Connessione al database
+        connection = db.getdb() 
         cursor = connection.cursor(dictionary=True)
 
-        # Query per ottenere tutti i film
+        
         cursor.execute("SELECT * FROM film")
         films = cursor.fetchall()
 
-        # Formattazione del risultato
+        
         films_list = [
             {
                 "id": film["id"],
@@ -456,11 +458,11 @@ def load_films():
         return jsonify({'status': 'SUCCESS', 'films': films_list})
 
     except Exception as e:
-        # Gestione degli errori
+      
         return jsonify({'status': 'ERROR', 'message': str(e)})
 
     finally:
-        # Chiusura della connessione
+       
         cursor.close()
         connection.close()
 
@@ -523,7 +525,7 @@ def select_seats():
     selected_seats = data.get('selected_seats')  # List of seat codes
     
     if not all([user_id, film_id, theater_id, screening_date, screening_time, selected_seats]):
-        return jsonify({'status': 'ERROR', 'message': 'Missing required data'}), 400
+        return jsonify({'status': 'ERROR', 'message': 'Missing required data'})
 
     connection = db.getdb()
     cursor = connection.cursor(dictionary=True)
@@ -533,10 +535,10 @@ def select_seats():
         cursor.execute("SELECT seat_count, available, is_full FROM theater WHERE id = %s", (theater_id,))
         theater = cursor.fetchone()
         if not theater:
-            return jsonify({'status': 'ERROR', 'message': 'Theater not found'}), 404
+            return jsonify({'status': 'ERROR', 'message': 'Theater not found'})
 
         if theater['is_full']:
-            return jsonify({'status': 'ERROR', 'message': 'Theater is fully booked'}), 400
+            return jsonify({'status': 'ERROR', 'message': 'Theater is fully booked'})
 
         # Retrieve seat IDs based on seat codes
         seat_placeholders = ', '.join(['%s'] * len(selected_seats))
@@ -556,7 +558,7 @@ def select_seats():
         occupied_seat_ids = {row['seat_id'] for row in cursor.fetchall()}
 
         if occupied_seat_ids:
-            return jsonify({'status': 'ERROR', 'message': 'Some seats are already occupied'}), 400
+            return jsonify({'status': 'ERROR', 'message': 'Some seats are already occupied'})
 
         # Update seat_status table to mark seats as occupied
         seat_status_updates = [(seat_id, theater_id, screening_date, screening_time) for seat_id in seat_ids.values()]
@@ -584,15 +586,139 @@ def select_seats():
 
         connection.commit()
         
-        return jsonify({'status': 'SUCCESS', 'message': 'Booking successful'}), 200
+        return jsonify({'status': 'SUCCESS', 'message': 'Booking successful'})
 
     except Exception as e:
         connection.rollback()
-        return jsonify({'status': 'ERROR', 'message': str(e)}), 500
+        return jsonify({'status': 'ERROR', 'message': str(e)})
 
     finally:
         cursor.close()
         connection.close()
+
+from PIL import Image, ImageDraw
+import barcode
+from barcode.writer import ImageWriter
+
+import os
+
+def generate_barcode(ticket_info):
+    # Create a barcode object with ImageWriter
+    CODE128 = barcode.get_barcode_class('code128')
+    writer = ImageWriter()
+
+    # Customize barcode size and remove human-readable text
+    writer.module_width = 0.2  # Adjust width of each module
+    writer.module_height = 15  # Adjust height of each module
+   
+    
+
+    barcode_instance = CODE128(ticket_info, writer=writer)
+
+    # Save the barcode to a bytes buffer
+    buf = io.BytesIO()
+    barcode_instance.write(buf)
+    buf.seek(0)
+
+    # Open the image and create a new image without the human-readable text
+    img = Image.open(buf)
+    img_no_text = img.copy()
+    
+    # Remove the human-readable text (assuming it's at the bottom)
+    draw = ImageDraw.Draw(img_no_text)
+    width, height = img_no_text.size
+    draw.rectangle([0, height - 20, width, height], fill="white")  # Adjust as needed
+    
+    # Save the modified image to a bytes buffer
+    buf_no_text = io.BytesIO()
+    img_no_text.save(buf_no_text, format='PNG')
+    buf_no_text.seek(0)
+    
+    return buf_no_text
+
+@bp.route('/get_tickets', methods=['GET'])
+def get_tickets():
+    data = request.get_json()
+    user = data.get('user')
+
+    if not user:
+        return jsonify({'status': 'ERROR', 'message': 'No user provided'})
+
+    user_id = user.get('id')
+    if not user_id:
+        return jsonify({'status': 'ERROR', 'message': 'No user ID provided'})
+
+    connection = db.getdb()  
+    cursor = connection.cursor()
+    try:
+        cursor.execute("""
+            SELECT p.screening_date, p.screening_time, t.name AS theater_name, f.title AS film_title, p.seats
+            FROM purchases p
+            JOIN theater t ON p.theater_id = t.id
+            JOIN film f ON p.film_id = f.id
+            WHERE p.user_id = %s
+        """, (user_id,))
+        
+        results = cursor.fetchall()
+
+        if not results:
+            return jsonify({'status': 'ERROR', 'message': 'No tickets found for this user'})
+
+        tickets = []
+        barcode_dir = os.path.join(os.path.dirname(__file__), 'static', 'barcode_tickets')
+
+        if not os.path.exists(barcode_dir):
+            os.makedirs(barcode_dir)
+
+        for result in results:
+            screening_date = result[0]
+            screening_time = result[1]
+            theater_name = result[2]
+            film_title = result[3]
+            seats = result[4].split(',')
+
+            if isinstance(screening_time, timedelta):
+                total_seconds = int(screening_time.total_seconds())
+                hours = total_seconds // 3600
+                minutes = (total_seconds % 3600) // 60
+                screening_time_str = f"{hours:02}:{minutes:02}"
+            else:
+                screening_time_str = screening_time.strftime("%H:%M")
+
+            for seat in seats:
+                ticket_info = f"Date: {screening_date.strftime('%Y-%m-%d')}, Time: {screening_time_str}, Theater: {theater_name}, Film: {film_title}, Seat: {seat.strip()}"
+
+                # Generate barcode for this ticket
+                barcode_image = generate_barcode(ticket_info)
+                
+                # Save the barcode to a file and get its URL
+                barcode_filename = f"ticket_{user_id}_{screening_date.strftime('%Y%m%d')}_{seat.strip()}.png"
+                barcode_path = os.path.join(barcode_dir, barcode_filename)
+                with open(barcode_path, 'wb') as f:
+                    f.write(barcode_image.getvalue())
+
+                # Add ticket with barcode URL to the list
+                ticket = {
+                    'screening_date': screening_date.strftime("%Y-%m-%d"),
+                    'screening_time': screening_time_str,
+                    'theater': theater_name,
+                    'film_title': film_title,
+                    'seat': seat.strip(),
+                    'barcode_url': f'/static{barcode_filename}'  # URL to access the barcode
+                }
+                tickets.append(ticket)
+
+        return jsonify({'user_id': user_id, 'tickets': tickets})
+
+    except Exception as e:
+        return jsonify({'status': 'ERROR', 'message': str(e)})
+
+    finally:
+        cursor.close()  
+        connection.close()
+
+app = Flask(__name__, static_folder='static', static_url_path='/static')
+
 
 '''
 NON PRENDERE IN CONSIDERAZIONE
