@@ -1,6 +1,6 @@
 import os
 from flask import Flask
-from . import db, pwm
+from . import db, pwm, dev
 
 
 def create_app(test_config=None):
@@ -16,6 +16,7 @@ def create_app(test_config=None):
 
     db.init_app(app)
     app.register_blueprint(pwm.bp)
+    app.register_blueprint(dev.bp)
 
     if test_config is None:
         # load the instance config, if it exists, when not testing
