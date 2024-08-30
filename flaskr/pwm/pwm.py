@@ -2,10 +2,14 @@ from flask import (
     Blueprint, Flask, g, redirect, render_template, 
     request, session, url_for, jsonify, current_app
 )
-from . import db
-import qrcode
+
+from flask import Blueprint, abort, send_file
+import barcode
+from barcode.writer import ImageWriter
 import io
-import os
+import string
+import random
+from . import db
 from flask_bcrypt import Bcrypt
 from decimal import Decimal
 from datetime import timedelta, datetime 
@@ -888,30 +892,155 @@ def films_by_category():
 
 
 
-from flask import Blueprint, abort, send_file
-import barcode
-from barcode.writer import ImageWriter
-import io
 
 
-@bp.route('/barcodegen/<format>/<string:stringToBarcode>', methods=['GET'])
-def generate_barcode(format, stringToBarcode):
-    # Get the barcode class based on the provided format
-    try:
-        BarcodeClass = barcode.get_barcode_class(format)
-    except barcode.errors.BarcodeNotFoundError:
-        return abort(400, description=f"Barcode format '{format}' is not supported.")
+def get_seat_id(ticket_id):
+    connection = db.getdb()
+    cursor = connection.cursor()
     
-    # Generate the barcode
+    query = """
+    SELECT seat_id FROM seat_status WHERE id = %s
+    """
+    
+    cursor.execute(query, (ticket_id,))
+    result = cursor.fetchone()
+    cursor.close()
+    
+    if result:
+        return result[0]
+    else:
+        return None
+
+def generate_random_string(length):
+    characters = string.ascii_letters + string.digits
+    return ''.join(random.choice(characters) for _ in range(length))
+
+@bp.route('/barcodegen', methods=['GET'])
+def generate_barcode():
+    ticket_id = request.args.get('ticket_id')
+    
+    if not ticket_id:
+        return abort(400, description="Missing 'ticket_id' in request parameters.")
+    
     try:
-        barcode_instance = BarcodeClass(stringToBarcode, writer=ImageWriter())
+        ticket_id = int(ticket_id)
+    except ValueError:
+        return abort(400, description="Invalid 'ticket_id' format. It should be an integer.")
+    
+    seat_id = get_seat_id(ticket_id)
+    
+    if seat_id is None:
+        return abort(404, description="Ticket ID not found.")
+    
+    seat_id_str = str(seat_id)
+    
+    if len(seat_id_str) > 15:
+        return abort(400, description="Seat ID is too long. The total length must be 15 characters.")
+    
+    random_part_length = 15 - len(seat_id_str)
+    random_part = generate_random_string(random_part_length)
+    
+    string_to_barcode = seat_id_str + random_part
+    
+    BarcodeClass = barcode.get_barcode_class('code128')
+    
+    try:
+        barcode_instance = BarcodeClass(string_to_barcode, writer=ImageWriter())
     except ValueError as e:
-        return abort(400, description=f"Error: {e}")
+        return abort(400, description=f"Error generating barcode: {e}")
     
-    # Save the barcode to an in-memory file
     img_io = io.BytesIO()
     barcode_instance.write(img_io)
     img_io.seek(0)
     
-    # Return the image as a response
     return send_file(img_io, mimetype='image/png')
+
+#http://192.168.1.134:9000/pwm/barcodegen?ticket_id=3
+
+
+
+
+from flask import Blueprint, send_file
+import io
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image
+import qrcode
+
+
+@bp.route('/download_pdf', methods=['GET'])
+def download_pdf():
+    # Create an in-memory buffer for the PDF
+    pdf_buffer = io.BytesIO()
+    pdf = SimpleDocTemplate(pdf_buffer, pagesize=A4)
+
+    # Get some basic styles
+    styles = getSampleStyleSheet()
+
+    # Create a custom style for the title
+    title_style = ParagraphStyle(
+        'TitleStyle',
+        parent=styles['Title'],
+        fontName='Helvetica-Bold',
+        fontSize=24,
+        textColor='blue',  # Set the text color to blue
+        alignment=1,       # Center alignment
+    )
+
+    # Create a list to hold the elements of the PDF
+    elements = []
+
+    # Add a title
+    title = Paragraph("ARPA CINEMA", title_style)
+    elements.append(title)
+
+    # Add a spacer
+    elements.append(Spacer(1, 12))
+
+    # Add some body text
+    body_text = Paragraph("This PDF contains a QR code generated dynamically.", styles['BodyText'])
+    elements.append(body_text)
+
+    # Generate a QR code
+    qr_data = "https://example.com"  # Replace with your desired data (URL, text, etc.)
+    qr_img = generate_qr_code(qr_data)
+
+    # Add QR code image to the PDF
+    qr_code_image = Image(qr_img)
+    qr_code_image.drawHeight = 100  # Set desired height
+    qr_code_image.drawWidth = 100    # Set desired width
+    elements.append(qr_code_image)
+
+    # Add a concluding paragraph
+    conclusion = Paragraph("This PDF was generated with a QR code.", styles['BodyText'])
+    elements.append(conclusion)
+
+    # Build the PDF
+    pdf.build(elements)
+
+    # Seek to the beginning of the BytesIO buffer
+    pdf_buffer.seek(0)
+
+    # Return the PDF as a response
+    return send_file(pdf_buffer, mimetype='application/pdf', as_attachment=False, download_name='generated.pdf')
+
+def generate_qr_code(data):
+    # Generate a QR code image
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(data)
+    qr.make(fit=True)
+
+    # Create an image from the QR Code instance
+    img = qr.make_image(fill_color="black", back_color="white")
+
+    # Save the QR code image to a BytesIO object
+    img_buffer = io.BytesIO()
+    img.save(img_buffer, format='PNG')  # Save the image as PNG
+    img_buffer.seek(0)  # Seek to the start of the BytesIO buffer
+
+    return img_buffer
