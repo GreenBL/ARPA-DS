@@ -493,6 +493,8 @@ def edit_password():
         cursor.close()
         connection.close()
 
+
+
 @bp.route('/load_images', methods=['GET'])
 def load_images():
     try:
@@ -516,6 +518,8 @@ def load_images():
         # Close the connection
         cursor.close()
         connection.close()
+
+
 
 
 @bp.route('/associate_image', methods=['POST'])
@@ -594,7 +598,7 @@ def load_films():
         connection.close()
 
 
-
+#PER I FILM IN HOME
 @bp.route('/movie_of_the_week', methods=['GET'])
 def movie_of_the_week():
     try:
@@ -640,8 +644,9 @@ def movie_of_the_week():
         connection.close()
 
 
-@bp.route('/select_seats', methods=['POST'])
-def select_seats():
+
+@bp.route('/select_seats_&_buy_tickets', methods=['POST'])
+def select_seats_and_buy_tickets():
     data = request.get_json()
     
     user_id = data.get('user_id')
@@ -649,7 +654,7 @@ def select_seats():
     theater_id = data.get('theater_id')
     screening_date = data.get('screening_date')
     screening_time = data.get('screening_time')
-    selected_seats = data.get('selected_seats')  
+    selected_seats = data.get('selected_seats')
     
     if not all([user_id, film_id, theater_id, screening_date, screening_time, selected_seats]):
         return jsonify({'status': 'ERROR', 'message': 'Missing required data'})
@@ -658,6 +663,8 @@ def select_seats():
     cursor = connection.cursor(dictionary=True)
     
     try:
+        connection.start_transaction()
+
         # Check if the theater is full
         cursor.execute("SELECT seat_count, available, is_full FROM theater WHERE id = %s", (theater_id,))
         theater = cursor.fetchone()
@@ -687,54 +694,8 @@ def select_seats():
         if occupied_seat_ids:
             return jsonify({'status': 'ERROR', 'message': 'Some seats are already occupied'})
 
-        # Record the purchase without updating seat_status
-        cursor.execute("""
-            INSERT INTO purchases (user_id, film_id, theater_id, screening_date, screening_time, seat_count, seats)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """, (user_id, film_id, theater_id, screening_date, screening_time, len(selected_seats), ','.join(selected_seats)))
-
-        connection.commit()
-        
-        return jsonify({'status': 'SUCCESS', 'message': 'Seats reserved successfully. Complete payment to confirm booking.'})
-
-    except Exception as e:
-        connection.rollback()
-        return jsonify({'status': 'ERROR', 'message': str(e)})
-
-    finally:
-        cursor.close()
-        connection.close()
-
-
-
-
-@bp.route('/buy_tickets', methods=['POST'])
-def buy_tickets():
-    data = request.get_json()
-    user_id = data.get('user_id')
-    
-    if not user_id:
-        return jsonify({'status': 'ERROR', 'message': 'User ID is required'})
-    
-    connection = db.getdb()
-    cursor = connection.cursor(dictionary=True)
-
-    try:
-        connection.start_transaction()
-
-        # Retrieve unpaid purchases
-        cursor.execute("""
-            SELECT id, seat_count, seats, theater_id, screening_date, screening_time 
-            FROM purchases 
-            WHERE user_id = %s AND paid = FALSE
-        """, (user_id,))
-        purchases = cursor.fetchall()
-        
-        if not purchases:
-            return jsonify({'status': 'ERROR', 'message': 'No unpaid purchases found for the user'})
-        
-        # Calculate total seat count and total price
-        seat_count_total = sum(purchase['seat_count'] for purchase in purchases)
+        # Calculate total price
+        seat_count_total = len(selected_seats)
         ticket_price = Decimal('8.00')
         total_price = ticket_price * seat_count_total
         
@@ -754,47 +715,31 @@ def buy_tickets():
         new_amount = current_amount - total_price
         cursor.execute("UPDATE balance SET amount = %s WHERE ref_user = %s", (new_amount, user_id))
         
-        # Mark purchases as paid
-        purchase_ids = [purchase['id'] for purchase in purchases]
-        format_strings = ','.join(['%s'] * len(purchase_ids))
-        cursor.execute(f"""
-            UPDATE purchases 
-            SET paid = TRUE 
-            WHERE id IN ({format_strings})
-        """, tuple(purchase_ids))
+        # Record the purchase
+        cursor.execute("""
+            INSERT INTO purchases (user_id, film_id, theater_id, screening_date, screening_time, seat_count, seats)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (user_id, film_id, theater_id, screening_date, screening_time, seat_count_total, ','.join(selected_seats)))
 
-        # Mark seats as occupied in seat_status
-        for purchase in purchases:
-            selected_seats = purchase['seats'].split(',')
-            seat_ids = []
-            
-            # Get seat IDs
-            seat_placeholders = ', '.join(['%s'] * len(selected_seats))
-            cursor.execute(f"""
-                SELECT id FROM seat 
-                WHERE seat_code IN ({seat_placeholders}) AND theater_id = %s
-            """, (*selected_seats, purchase['theater_id']))
-            seat_ids = [row['id'] for row in cursor.fetchall()]
-
-            # Update seat_status
-            seat_status_updates = [(seat_id, purchase['theater_id'], purchase['screening_date'], purchase['screening_time']) for seat_id in seat_ids]
-            cursor.executemany("""
-                INSERT INTO seat_status (seat_id, theater_id, screening_date, screening_time, is_occupied)
-                VALUES (%s, %s, %s, %s, TRUE)
-                ON DUPLICATE KEY UPDATE is_occupied = TRUE
-            """, seat_status_updates)
+        # Update seat_status
+        seat_status_updates = [(seat_id, theater_id, screening_date, screening_time) for seat_id in seat_ids.values()]
+        cursor.executemany("""
+            INSERT INTO seat_status (seat_id, theater_id, screening_date, screening_time, is_occupied)
+            VALUES (%s, %s, %s, %s, TRUE)
+            ON DUPLICATE KEY UPDATE is_occupied = TRUE
+        """, seat_status_updates)
         
-        # Check if the theater is now full and update it
+        # Update theater availability
         cursor.execute("""
             UPDATE theater SET available = available - %s WHERE id = %s
-        """, (seat_count_total, purchases[0]['theater_id']))
+        """, (seat_count_total, theater_id))
         
-        cursor.execute("SELECT available FROM theater WHERE id = %s", (purchases[0]['theater_id'],))
+        cursor.execute("SELECT available FROM theater WHERE id = %s", (theater_id,))
         available_seats = cursor.fetchone()['available']
 
         if available_seats == 0:
-            cursor.execute("UPDATE theater SET is_full = TRUE WHERE id = %s", (purchases[0]['theater_id'],))
-        
+            cursor.execute("UPDATE theater SET is_full = TRUE WHERE id = %s", (theater_id,))
+
         # Update user's points
         cursor.execute("SELECT level, points FROM users WHERE id = %s FOR UPDATE", (user_id,))
         user_record = cursor.fetchone()
@@ -824,9 +769,11 @@ def buy_tickets():
 
 
 
-#PER OTTENERE LE INFO DEI SINGOLI BIGLIETTI SCELTI
-@bp.route('/get_tickets', methods=['GET'])
-def get_tickets():
+
+
+#PER OTTENERE LE INFO DI TUTTI I BIGLIETTI COMPRATI DA UN USER 
+@bp.route('/chronology', methods=['GET'])
+def chronology():
     data = request.get_json()
     user = data.get('user')
 
@@ -838,8 +785,9 @@ def get_tickets():
         return jsonify({'status': 'ERROR', 'message': 'No user ID provided'})
 
     connection = db.getdb()  
-    cursor = connection.cursor()
+    cursor = connection.cursor(dictionary=True)
     try:
+        
         cursor.execute("""
             SELECT p.screening_date, p.screening_time, t.name AS theater_name, f.title AS film_title, p.seats
             FROM purchases p
@@ -856,11 +804,11 @@ def get_tickets():
         tickets = []
 
         for result in results:
-            screening_date = result[0]
-            screening_time = result[1]
-            theater_name = result[2]
-            film_title = result[3]
-            seats = result[4].split(',')
+            screening_date = result['screening_date']
+            screening_time = result['screening_time']
+            theater_name = result['theater_name']
+            film_title = result['film_title']
+            seats = result['seats'].split(',')
 
             if isinstance(screening_time, timedelta):
                 total_seconds = int(screening_time.total_seconds())
@@ -888,6 +836,81 @@ def get_tickets():
     finally:
         cursor.close()  
         connection.close()
+
+'''
+{
+    "user": {
+        "id": 1
+    }
+}
+'''
+
+
+
+#OTTENERE LE INFORMAZIONI DI UN SINGOLO BIGLIETTO DI UN USER
+@bp.route('/get_ticket', methods=['POST'])
+def get_ticket():
+    data = request.get_json()
+    user_id = data.get('user_id')
+    purchases_id = data.get('purchases_id')
+    
+    if not purchases_id:
+        return jsonify({'status': 'ERROR', 'message': 'No purchases ID provided'})
+    if not user_id:
+        return jsonify({'status': 'ERROR', 'message': 'No user ID provided'})
+
+    connection = db.getdb()
+    cursor = connection.cursor(dictionary=True)
+
+    try:
+       
+        cursor.execute("""
+            SELECT p.screening_date, p.screening_time, t.name AS theater_name, f.title AS film_title, p.seats
+            FROM purchases p
+            JOIN theater t ON p.theater_id = t.id
+            JOIN film f ON p.film_id = f.id
+            WHERE p.id = %s AND p.user_id = %s
+        """, (purchases_id, user_id))
+
+        result = cursor.fetchone()
+
+        if not result:
+            return jsonify({'status': 'ERROR', 'message': 'No ticket found for this ID and user'})
+
+        screening_date = result['screening_date']
+        screening_time = result['screening_time']
+        theater_name = result['theater_name']
+        film_title = result['film_title']
+        seats = result['seats']
+        seats_list = seats.split(',')
+
+        # Format screening time
+        if isinstance(screening_time, timedelta):
+            total_seconds = int(screening_time.total_seconds())
+            hours = total_seconds // 3600
+            minutes = (total_seconds % 3600) // 60
+            screening_time_str = f"{hours:02}:{minutes:02}"
+        else:
+            screening_time_str = screening_time.strftime("%H:%M")
+
+        # Prepare response
+        ticket = {
+            'screening_date': screening_date.strftime("%Y-%m-%d"),
+            'screening_time': screening_time_str,
+            'theater': theater_name,
+            'film_title': film_title,
+            'seats': [seat.strip() for seat in seats_list]
+        }
+
+        return jsonify({'ticket': ticket})
+
+    except Exception as e:
+        return jsonify({'status': 'ERROR', 'message': str(e)})
+
+    finally:
+        cursor.close()
+        connection.close()
+
 
 
 
@@ -982,40 +1005,42 @@ def occupied_seats():
 '''
 #NON PRENDERE IN CONSIDERAZIONE
 import random
-import datetime
-from flask import jsonify
+from datetime import date, timedelta
+import logging
+from flask import jsonify, request, Blueprint
+
 
 def save_random_screening_dates(film_id, theater_id):
     connection = db.getdb()
     cursor = connection.cursor(dictionary=True)
 
     try:
-        # Ottieni la data corrente e calcola l'inizio e la fine della settimana
-        today = datetime.date.today()
-        start_of_week = today - datetime.timedelta(days=today.weekday())
-        end_of_week = start_of_week + datetime.timedelta(days=6)
+        # Ottieni la data di oggi e calcola l'inizio e la fine della settimana
+        today = date.today()  # usando 'date' direttamente invece di 'datetime.date'
+        start_of_week = today - timedelta(days=today.weekday())
+        end_of_week = start_of_week + timedelta(days=6)
 
         # Genera 3 date casuali all'interno della settimana corrente
-        random_dates = random.sample([start_of_week + datetime.timedelta(days=i) for i in range(7)], 3)
+        random_dates = random.sample([start_of_week + timedelta(days=i) for i in range(7)], 3)
 
-        # Inserisci i giorni casuali nella tabella screening
+        # Inserisci le date casuali nella tabella screening
         for random_date in random_dates:
             cursor.execute("""
                 INSERT INTO screening (film_id, theater_id, scrining_start, date) 
                 VALUES (%s, %s, %s, %s)
             """, (film_id, theater_id, '18:00:00', random_date))
-        
+
         connection.commit()
         return jsonify({'status': 'SUCCESS', 'message': 'Random screening dates saved successfully'})
 
     except Exception as e:
         connection.rollback()
+        logging.error(f"Error saving screening dates: {str(e)}")
         return jsonify({'status': 'ERROR', 'message': str(e)})
 
     finally:
         cursor.close()
         connection.close()
-
 
 @bp.route('/save_random_dates', methods=['POST'])
 def save_dates():
@@ -1026,15 +1051,19 @@ def save_dates():
     if not film_id or not theater_id:
         return jsonify({'status': 'ERROR', 'message': 'Film ID and Theater ID are required'})
 
+    if not isinstance(film_id, int) or not isinstance(theater_id, int):
+        return jsonify({'status': 'ERROR', 'message': 'Film ID and Theater ID must be integers'})
+
     return save_random_screening_dates(film_id, theater_id)
-
-
+'''
+'''
 {
   "film_id": 1,
   "theater_id": 2
 }
 
 '''
+
 
 
 
@@ -1388,7 +1417,7 @@ def download_pdf():
         )
         seat = cursor.fetchone()
         if not seat:
-            return jsonify({"error": "Seat not found"}), 404
+            return jsonify({"error": "Seat not found"})
 
         seat_details_text = f"FILA {seat['row_letter']} NUMERO {seat['seat_number']}"
         qr_data = f"https://example.com/purchase/{purchase_id}/{seat_code}"
@@ -1420,8 +1449,8 @@ def download_pdf():
 
 
 
-@bp.route('/select_popcorn', methods=['POST'])
-def select_popcorn():
+@bp.route('/select_popcorn_and_buy_item', methods=['POST'])
+def select_popcorn_and_buy_item():
     data = request.get_json()
 
     user_id = data.get('user_id')
@@ -1434,7 +1463,7 @@ def select_popcorn():
     cursor = connection.cursor(dictionary=True)
 
     try:
-        # Retrieve popcorn details
+      
         cursor.execute("SELECT category, size, description, price FROM popcorn WHERE id = %s", (popcorn_id,))
         popcorn = cursor.fetchone()
         
@@ -1442,16 +1471,32 @@ def select_popcorn():
             return jsonify({'status': 'ERROR', 'message': 'Popcorn not found'})
 
         price_points = int(popcorn['price'])  # Use price as price_points
-
+        
+        # Retrieve user points
+        cursor.execute("SELECT points FROM users WHERE id = %s FOR UPDATE", (user_id,))
+        user_record = cursor.fetchone()
+        
+        if user_record is None:
+            return jsonify({'status': 'ERROR', 'message': 'User record not found'})
+        
+        current_points = user_record['points']
+        
+        if price_points > current_points:
+            return jsonify({'status': 'ERROR', 'message': 'Insufficient points'})
+        
+   
+        new_points = current_points - price_points
+        cursor.execute("UPDATE users SET points = %s WHERE id = %s", (new_points, user_id))
+        
         # Insert into points_redeemed table
         cursor.execute("""
-            INSERT INTO points_redeemed (user_id, item_type, item_id, category, size, description, price_points, paid)
-            VALUES (%s, 'popcorn', %s, %s, %s, %s, %s, %s)
-        """, (user_id, popcorn_id, popcorn['category'], popcorn['size'], popcorn['description'], price_points, False))
+            INSERT INTO points_redeemed (user_id, item_type, item_id, category, size, description, price_points)
+            VALUES (%s, 'popcorn', %s, %s, %s, %s, %s)
+        """, (user_id, popcorn_id, popcorn['category'], popcorn['size'], popcorn['description'], price_points))
 
         connection.commit()
 
-        return jsonify({'status': 'SUCCESS', 'message': 'Popcorn selected successfully.', 'total_points': price_points})
+        return jsonify({'status': 'SUCCESS', 'message': 'Combo selected and purchased successfully.', 'remaining_points': new_points})
 
     except Exception as e:
         connection.rollback()
@@ -1464,8 +1509,8 @@ def select_popcorn():
 
 
 
-@bp.route('/select_drink', methods=['POST'])
-def select_drink():
+@bp.route('/select_drink_and_buy_item', methods=['POST'])
+def select_drink_and_buy_item():
     data = request.get_json()
 
     user_id = data.get('user_id')
@@ -1478,7 +1523,8 @@ def select_drink():
     cursor = connection.cursor(dictionary=True)
 
     try:
-        # Retrieve drink details
+        connection.start_transaction()
+
         cursor.execute("SELECT category, size, description, price FROM drinks WHERE id = %s", (drink_id,))
         drink = cursor.fetchone()
         
@@ -1487,19 +1533,35 @@ def select_drink():
 
         price_points = int(drink['price'])  # Use price as price_points
 
-        # Insert into points_redeemed table
+        # Retrieve user's current points
+        cursor.execute("SELECT points FROM users WHERE id = %s FOR UPDATE", (user_id,))
+        user_record = cursor.fetchone()
+        
+        if user_record is None:
+            return jsonify({'status': 'ERROR', 'message': 'User record not found'})
+        
+        current_points = user_record['points']
+        
+        # Check if user has enough points
+        if price_points > current_points:
+            return jsonify({'status': 'ERROR', 'message': 'Insufficient points'})
+        
+        # Deduct points and update the user's points
+        new_points = current_points - price_points
+        cursor.execute("UPDATE users SET points = %s WHERE id = %s", (new_points, user_id))
+       
         cursor.execute("""
-            INSERT INTO points_redeemed (user_id, item_type, item_id, category, size, description, price_points, paid)
-            VALUES (%s, 'drink', %s, %s, %s, %s, %s, %s)
-        """, (user_id, drink_id, drink['category'], drink['size'], drink['description'], price_points, False))
+            INSERT INTO points_redeemed (user_id, item_type, item_id, category, size, description, price_points)
+            VALUES (%s, 'drink', %s, %s, %s, %s, %s)
+        """, (user_id, drink_id, drink['category'], drink['size'], drink['description'], price_points))
 
         connection.commit()
 
-        return jsonify({'status': 'SUCCESS', 'message': 'Drink selected successfully.', 'total_points': price_points})
+        return jsonify({'status': 'SUCCESS', 'message': 'Item selected and purchased successfully.', 'remaining_points': new_points})
 
     except Exception as e:
         connection.rollback()
-        return jsonify({'status': 'ERROR', 'message': str(e)})
+        return jsonify({'status': 'ERROR', 'message': f'An error occurred: {str(e)}'})
 
     finally:
         cursor.close()
@@ -1507,8 +1569,9 @@ def select_drink():
 
 
 
-@bp.route('/select_combo', methods=['POST'])
-def select_combo():
+
+@bp.route('/select_combo_and_buy_item', methods=['POST'])
+def select_combo_and_buy_item():
     data = request.get_json()
 
     user_id = data.get('user_id')
@@ -1521,161 +1584,53 @@ def select_combo():
     cursor = connection.cursor(dictionary=True)
 
     try:
-        # Retrieve combo details
+        connection.start_transaction()
+
+       
         cursor.execute("SELECT category, menu, description, price FROM combo WHERE id = %s", (combo_id,))
         combo = cursor.fetchone()
-        
+
         if not combo:
             return jsonify({'status': 'ERROR', 'message': 'Combo not found'})
 
-        price_points = int(combo['price']) 
+        price_points = int(combo['price'])
 
-      
-        cursor.execute("""
-            INSERT INTO points_redeemed (user_id, item_type, item_id, category, menu, description, price_points, paid)
-            VALUES (%s, 'combo', %s, %s, %s, %s, %s, %s)
-        """, (user_id, combo_id, combo['category'], combo['menu'], combo['description'], price_points, False))
-
-        connection.commit()
-
-        return jsonify({'status': 'SUCCESS', 'message': 'Combo selected successfully.', 'total_points': price_points})
-
-    except Exception as e:
-        connection.rollback()
-        return jsonify({'status': 'ERROR', 'message': str(e)})
-
-    finally:
-        cursor.close()
-        connection.close()
-
-
-
-@bp.route('/cancel_selection', methods=['POST'])
-def cancel_selection():
-    data = request.get_json()
-    
-    user_id = data.get('user_id')
-    record_id = data.get('record_id') 
-    
-    if not all([user_id, record_id]):
-        return jsonify({'status': 'ERROR', 'message': 'User ID and Record ID are required'})
-    
-    connection = db.getdb()
-    cursor = connection.cursor(dictionary=True)
-    
-    try:
-       
-        connection.start_transaction()
-        
-       
-        cursor.execute("""
-            SELECT id, price_points, paid 
-            FROM points_redeemed 
-            WHERE user_id = %s AND id = %s
-        """, (user_id, record_id))  
-        record = cursor.fetchone()
-        
-        if not record:
-            connection.rollback()
-            return jsonify({'status': 'ERROR', 'message': 'Record not found'})
-        
-        if record['paid']:
-            connection.rollback()
-            return jsonify({'status': 'ERROR', 'message': 'Cannot cancel a paid item'})
-        
-        # Delete the record
-        cursor.execute("""
-            DELETE FROM points_redeemed 
-            WHERE user_id = %s AND id = %s
-        """, (user_id, record_id))  
-        
-        
-        cursor.execute("UPDATE users SET points = points + %s WHERE id = %s", (record['price_points'], user_id))
-        
-        connection.commit()
-        
-        return jsonify({'status': 'SUCCESS', 'message': 'Selection canceled successfully, points refunded'})
-
-    except Exception as e:
-        connection.rollback()
-        return jsonify({'status': 'ERROR', 'message': f'An error occurred: {str(e)}'})
-    
-    finally:
-        try:
-            
-            cursor.fetchall()
-        except Exception:
-            pass
-        
-        cursor.close()
-        connection.close()
-
-
-
-@bp.route('/buy_items_from_points_redeemed', methods=['POST'])
-def buy_items_from_points_redeemed():
-    data = request.get_json()
-    user_id = data.get('user_id')
-    
-    if not user_id:
-        return jsonify({'status': 'ERROR', 'message': 'User ID is required'})
-    
-    connection = db.getdb()
-    cursor = connection.cursor(dictionary=True)
-
-    try:
-        connection.start_transaction()
-
-        # Retrieve unpaid items
-        cursor.execute("""
-            SELECT id, item_type, item_id, category, size, menu, description, price_points 
-            FROM points_redeemed 
-            WHERE user_id = %s AND paid = FALSE
-        """, (user_id,))
-        items = cursor.fetchall()
-        
-        if not items:
-            return jsonify({'status': 'ERROR', 'message': 'No unpaid items found for the user'})
-        
-        # Calculate total points needed
-        total_points = sum(item['price_points'] for item in items)
-        
-        
         cursor.execute("SELECT points FROM users WHERE id = %s FOR UPDATE", (user_id,))
         user_record = cursor.fetchone()
-        
+
         if user_record is None:
             return jsonify({'status': 'ERROR', 'message': 'User record not found'})
-        
+
         current_points = user_record['points']
-        
-        if total_points > current_points:
+
+        if price_points > current_points:
             return jsonify({'status': 'ERROR', 'message': 'Insufficient points'})
-        
-       
-        new_points = current_points - total_points
+
+        # Deduct the points from the user's account
+        new_points = current_points - price_points
         cursor.execute("UPDATE users SET points = %s WHERE id = %s", (new_points, user_id))
-        
-        
-        item_ids = [item['id'] for item in items]
-        format_strings = ','.join(['%s'] * len(item_ids))
-        cursor.execute(f"""
-            UPDATE points_redeemed 
-            SET paid = TRUE 
-            WHERE id IN ({format_strings})
-        """, tuple(item_ids))
+
+       
+        cursor.execute("""
+            INSERT INTO points_redeemed (user_id, item_type, item_id, category, menu, description, price_points)
+            VALUES (%s, 'combo', %s, %s, %s, %s, %s)
+        """, (user_id, combo_id, combo['category'], combo['menu'], combo['description'], price_points))
 
         connection.commit()
-        
-        return jsonify({'status': 'SUCCESS', 'message': 'Items purchased successfully, points deducted'})
+
+        return jsonify({'status': 'SUCCESS', 'message': 'Combo selected and purchased successfully.', 'total_points': price_points})
 
     except Exception as e:
         connection.rollback()
         return jsonify({'status': 'ERROR', 'message': f'An error occurred: {str(e)}'})
-    
+
     finally:
         cursor.close()
         connection.close()
+
+
+
+
 
 #PER OTTENERE LE INFO DEL SINGOLO PREMIO ACQUISTATO 
 @bp.route('/get_item_info', methods=['POST'])
@@ -1702,7 +1657,7 @@ def get_item_info():
         if not record:
             return jsonify({'status': 'ERROR', 'message': 'No purchased item found or item not paid'})
 
-        # Prepare the item information
+        
         item_info = {key: value for key, value in record.items() if value is not None}
 
         # Generate QR Code
@@ -1744,9 +1699,9 @@ def generate_qr_code(data):
 
 
 
-
-@bp.route('/chronology', methods=['POST'])
-def chronology():
+#OTTENERE LE INFORMAZIONI DI TUTTI I PREMI RISCATTATI DA QUELL'UTENTE 
+@bp.route('/get_items', methods=['POST'])
+def get_items():
     data = request.get_json()
     user_id = data.get('user_id')
 
@@ -1760,13 +1715,13 @@ def chronology():
         cursor.execute("""
             SELECT item_type, category, size, menu, description, price_points
             FROM points_redeemed
-            WHERE user_id = %s AND paid = TRUE
+            WHERE user_id = %s
         """, (user_id,))
         
         records = cursor.fetchall()
         
         if not records:
-            return jsonify({'status': 'ERROR', 'message': 'No paid items found for this user'})
+            return jsonify({'status': 'ERROR', 'message': 'No items found for this user'})
 
         # Filter out null values from each record
         filtered_records = []
@@ -1780,6 +1735,156 @@ def chronology():
         })
 
     except Exception as e:
+        return jsonify({'status': 'ERROR', 'message': str(e)})
+
+    finally:
+        cursor.close()
+        connection.close()
+
+
+@bp.route('/select_discounts', methods=['POST'])
+def select_discounts():
+    data = request.get_json()
+    user_id = data.get('user_id')
+    reward_type = data.get('reward_type')  # Should be either 'free_ticket' or 'ticket_discount'
+
+    if not all([user_id, reward_type]):
+        return jsonify({'status': 'ERROR', 'message': 'User ID and reward type are required'})
+
+    if reward_type not in ['free_ticket', 'ticket_discount']:
+        return jsonify({'status': 'ERROR', 'message': 'Invalid reward type'})
+
+    connection = db.getdb()
+    cursor = connection.cursor(dictionary=True)
+
+    try:
+        connection.start_transaction()
+
+        # Retrieve user details
+        cursor.execute("SELECT points, free_ticket_count, ticket_discounts FROM users WHERE id = %s FOR UPDATE", (user_id,))
+        user_record = cursor.fetchone()
+        
+        if user_record is None:
+            return jsonify({'status': 'ERROR', 'message': 'User record not found'})
+
+        current_points = user_record['points']
+
+        # Check if the user has enough points
+        if reward_type == 'free_ticket':
+            if current_points < 1000:
+                return jsonify({'status': 'ERROR', 'message': 'Insufficient points for free ticket'})
+            # Update the free ticket count
+            cursor.execute("UPDATE users SET free_ticket_count = free_ticket_count + 1 WHERE id = %s", (user_id,))
+        elif reward_type == 'ticket_discount':
+            if current_points < 700:
+                return jsonify({'status': 'ERROR', 'message': 'Insufficient points for ticket discount'})
+            # Update the ticket discount count
+            cursor.execute("UPDATE users SET ticket_discounts = ticket_discounts + 1 WHERE id = %s", (user_id,))
+
+       
+        points_to_deduct = 1000 if reward_type == 'free_ticket' else 700
+        new_points = current_points - points_to_deduct
+        cursor.execute("UPDATE users SET points = %s WHERE id = %s", (new_points, user_id))
+
+        connection.commit()
+
+        return jsonify({'status': 'SUCCESS', 'message': f'{reward_type.replace("_", " ").title()} successfully redeemed'})
+
+    except Exception as e:
+        connection.rollback()
+        return jsonify({'status': 'ERROR', 'message': str(e)})
+
+    finally:
+        cursor.close()
+        connection.close()
+
+
+@bp.route('/get_rewards', methods=['POST'])
+def get_rewards():
+    data = request.get_json()
+    user_id = data.get('user_id')
+
+    if not user_id:
+        return jsonify({'status': 'ERROR', 'message': 'User ID is required'})
+
+    connection = db.getdb()
+    cursor = connection.cursor(dictionary=True)
+
+    try:
+        # Retrieve user rewards
+        cursor.execute("""
+            SELECT free_ticket_count, ticket_discounts
+            FROM users
+            WHERE id = %s
+        """, (user_id,))
+        
+        user_record = cursor.fetchone()
+        
+        if user_record is None:
+            return jsonify({'status': 'ERROR', 'message': 'User record not found'})
+        
+        # Extract reward counts
+        free_ticket_count = user_record['free_ticket_count']
+        ticket_discounts = user_record['ticket_discounts']
+
+        return jsonify({
+            'free_ticket_count': free_ticket_count,
+            'ticket_discounts': ticket_discounts,
+            'status': 'SUCCESS'
+        })
+
+    except Exception as e:
+        return jsonify({'status': 'ERROR', 'message': str(e)})
+
+    finally:
+        cursor.close()
+        connection.close()
+
+
+
+@bp.route('/use_reward', methods=['POST'])
+def use_reward():
+    data = request.get_json()
+    user_id = data.get('user_id')
+    reward_type = data.get('reward_type')  # Should be either 'free_ticket' or 'ticket_discount'
+
+    if not all([user_id, reward_type]):
+        return jsonify({'status': 'ERROR', 'message': 'User ID and reward type are required'})
+
+    if reward_type not in ['free_ticket', 'ticket_discount']:
+        return jsonify({'status': 'ERROR', 'message': 'Invalid reward type'})
+
+    connection = db.getdb()
+    cursor = connection.cursor(dictionary=True)
+
+    try:
+        connection.start_transaction()
+
+        # Retrieve user rewards
+        cursor.execute("SELECT free_ticket_count, ticket_discounts FROM users WHERE id = %s FOR UPDATE", (user_id,))
+        user_record = cursor.fetchone()
+
+        if user_record is None:
+            return jsonify({'status': 'ERROR', 'message': 'User record not found'})
+
+        # Check and update reward based on the type
+        if reward_type == 'free_ticket':
+            if user_record['free_ticket_count'] <= 0:
+                return jsonify({'status': 'ERROR', 'message': 'No free tickets available'})
+            # Decrement the free_ticket_count
+            cursor.execute("UPDATE users SET free_ticket_count = free_ticket_count - 1 WHERE id = %s", (user_id,))
+        elif reward_type == 'ticket_discount':
+            if user_record['ticket_discounts'] <= 0:
+                return jsonify({'status': 'ERROR', 'message': 'No ticket discounts available'})
+            # Decrement the ticket_discounts
+            cursor.execute("UPDATE users SET ticket_discounts = ticket_discounts - 1 WHERE id = %s", (user_id,))
+
+        connection.commit()
+
+        return jsonify({'status': 'SUCCESS', 'message': f'{reward_type.replace("_", " ").title()} successfully used'})
+
+    except Exception as e:
+        connection.rollback()
         return jsonify({'status': 'ERROR', 'message': str(e)})
 
     finally:
