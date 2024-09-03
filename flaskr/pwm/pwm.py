@@ -111,46 +111,64 @@ def signup():
         connection.close() 
 
 
-@bp.route('/add_security_answer', methods=['POST'])
-def add_security_answer():
+@bp.route('/add_security_question_and_answer', methods=['POST'])
+def add_security_question_and_answer():
     data = request.get_json()
     user_id = data.get('user_id')
+    security_question = data.get('security_question')
     security_answer = data.get('security_answer')
 
-    if not all([user_id, security_answer]):
-        return jsonify({'status': 'ERROR', 'message': 'User ID and Security Answer are required'})
+    # Check that all necessary fields are present and valid
+    if user_id is None or security_question is None or security_answer is None:
+        return jsonify({'status': 'ERROR', 'message': 'ID, Question, Answer required'})
+
+    if not (0 <= security_question <= 5):
+        return jsonify({'status': 'ERROR', 'message': 'Question must be 0-5'})
 
     connection = db.getdb()
     cursor = connection.cursor()
 
     try:
-        # Add a security answer in the database
+        # Check if the user already has a security question and answer set
+        cursor.execute("""
+            SELECT security_question, security_answer 
+            FROM users 
+            WHERE id = %s
+        """, (user_id,))
+        result = cursor.fetchone()
+
+        if result and result[0] is not None and result[1] is not None:
+            return jsonify({'status': 'ERROR', 'message': 'Security Q&A already set'})
+
+        # Update the security_question and security_answer in the database
         cursor.execute("""
             UPDATE users 
-            SET security_answer = %s 
+            SET security_question = %s, security_answer = %s 
             WHERE id = %s
-        """, (security_answer, user_id))
+        """, (security_question, security_answer, user_id))
 
         # Commit the changes
         connection.commit()
 
         # Check if the update was successful
         if cursor.rowcount == 0:
-            return jsonify({'status': 'ERROR', 'message': 'User not found or no change made'})
+            return jsonify({'status': 'ERROR', 'message': 'User not found or no change'})
 
-        return jsonify({'status': 'SUCCESS', 'message': 'Security answer updated successfully'})
+        return jsonify({'status': 'SUCCESS', 'message': 'Updated successfully'})
 
     except Exception as e:
         connection.rollback()
-        return jsonify({'status': 'ERROR', 'message': f'An error occurred: {str(e)}'})
+        return jsonify({'status': 'ERROR', 'message': 'Error occurred'})
 
     finally:
         cursor.close()
         connection.close()
 
 
-@bp.route('/remove_security_answer', methods=['POST'])
-def remove_security_answer():
+
+
+@bp.route('/remove_security_question_and_answer', methods=['POST'])
+def remove_security_question_and_answer():
     data = request.get_json()
     user_id = data.get('user_id')
 
@@ -161,10 +179,10 @@ def remove_security_answer():
     cursor = connection.cursor()
 
     try:
-        # Update security_answer to NULL in the database
+        # Update security_question and security_answer to NULL in the database
         cursor.execute("""
             UPDATE users 
-            SET security_answer = NULL 
+            SET security_question = NULL, security_answer = NULL 
             WHERE id = %s
         """, (user_id,))
 
@@ -175,7 +193,7 @@ def remove_security_answer():
         if cursor.rowcount == 0:
             return jsonify({'status': 'ERROR', 'message': 'User not found or no change made'})
 
-        return jsonify({'status': 'SUCCESS', 'message': 'Security answer removed successfully'})
+        return jsonify({'status': 'SUCCESS', 'message': 'Security question and answer removed successfully'})
 
     except Exception as e:
         connection.rollback()
@@ -186,25 +204,31 @@ def remove_security_answer():
         connection.close()
 
 
-@bp.route('/update_security_answer', methods=['POST'])
-def update_security_answer():
+
+@bp.route('/update_security_question_and_answer', methods=['POST'])
+def update_security_question_and_answer():
     data = request.get_json()
     user_id = data.get('user_id')
+    new_security_question = data.get('security_question')
     new_security_answer = data.get('security_answer')
 
-    if not all([user_id, new_security_answer]):
-        return jsonify({'status': 'ERROR', 'message': 'User ID and new security answer are required'})
+    # Validate the input data
+    if user_id is None or new_security_question is None or new_security_answer is None:
+        return jsonify({'status': 'ERROR', 'message': 'User ID, question, and answer are required'})
+
+    if not (0 <= new_security_question <= 5):
+        return jsonify({'status': 'ERROR', 'message': 'Question must be 0-5'})
 
     connection = db.getdb()
     cursor = connection.cursor()
 
     try:
-        # Update security_answer in the database
+        # Update the security_question and security_answer in the database
         cursor.execute("""
             UPDATE users 
-            SET security_answer = %s 
+            SET security_question = %s, security_answer = %s 
             WHERE id = %s
-        """, (new_security_answer, user_id))
+        """, (new_security_question, new_security_answer, user_id))
 
         # Commit the changes
         connection.commit()
@@ -213,7 +237,7 @@ def update_security_answer():
         if cursor.rowcount == 0:
             return jsonify({'status': 'ERROR', 'message': 'User not found or no change made'})
 
-        return jsonify({'status': 'SUCCESS', 'message': 'Security answer updated successfully'})
+        return jsonify({'status': 'SUCCESS', 'message': 'Security question and answer updated successfully'})
 
     except Exception as e:
         connection.rollback()
@@ -222,6 +246,44 @@ def update_security_answer():
     finally:
         cursor.close()
         connection.close()
+
+
+
+@bp.route('/check_security_question', methods=['POST'])
+def check_security_question():
+    data = request.get_json()
+    user_id = data.get('user_id')
+
+    if not user_id:
+        return jsonify({'status': 'ERROR', 'message': 'User ID is required'})
+
+    connection = db.getdb()
+    cursor = connection.cursor()
+
+    try:
+        # Query to check if the user has a security question set
+        cursor.execute("""
+            SELECT security_question 
+            FROM users 
+            WHERE id = %s
+        """, (user_id,))
+        result = cursor.fetchone()
+
+        if result is None:
+            return jsonify({'status': 'ERROR', 'message': 'User not found'})
+
+        if result[0] is not None:
+            return jsonify({'status': 'SUCCESS', 'message': 'Security question is set'})
+        else:
+            return jsonify({'status': 'SUCCESS', 'message': 'No security question set'})
+
+    except Exception as e:
+        return jsonify({'status': 'ERROR', 'message': f'An error occurred: {str(e)}'})
+
+    finally:
+        cursor.close()
+        connection.close()
+
 
 
 @bp.route('/delete_user', methods=['POST'])
