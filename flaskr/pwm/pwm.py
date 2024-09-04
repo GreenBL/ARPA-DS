@@ -378,31 +378,24 @@ def update_user():
 
 
 #per caricare il saldo dell'utente loggato
-@bp.route('/get_amount', methods=['GET'])
+@bp.route('/get_amount', methods=['POST']) 
 def get_amount():
     data = request.get_json()
-    user = data.get('user')
+    user_id = data.get('user_id') 
     
-    if not user:
-        # No user provided
-        return jsonify({'status': 'ERROR', 'message': 'No user provided'})
-
-    user_id = user.get('id')
     if not user_id:
-        # No user ID provided
         return jsonify({'status': 'ERROR', 'message': 'No user ID provided'})
 
     connection = db.getdb()  
     cursor = connection.cursor()
     try:
-        # Query to get the balance associated with the user ID
         cursor.execute("SELECT amount FROM balance WHERE ref_user = %s", (user_id,))
         result = cursor.fetchone()
 
         if result is None:
             return jsonify({'status': 'ERROR', 'message': 'Profile not found'})
         
-        amount = result[0]  # Get the balance from the query result
+        amount = result[0]  
 
         return jsonify({'id': user_id, 'amount': amount})
 
@@ -412,6 +405,7 @@ def get_amount():
     finally:
         cursor.close()  
         connection.close() 
+
 
 
 #per aggiornare il saldo con il valore aggiunto
@@ -834,22 +828,17 @@ def select_seats_and_buy_tickets():
 
 
 #PER OTTENERE LE INFO DI TUTTI I BIGLIETTI COMPRATI DA UN USER 
-@bp.route('/chronology', methods=['GET'])
+@bp.route('/chronology', methods=['POST'])
 def chronology():
     data = request.get_json()
-    user = data.get('user')
+    user_id = data.get('user_id')
 
-    if not user:
-        return jsonify({'status': 'ERROR', 'message': 'No user provided'})
-
-    user_id = user.get('id')
     if not user_id:
         return jsonify({'status': 'ERROR', 'message': 'No user ID provided'})
 
     connection = db.getdb()  
     cursor = connection.cursor(dictionary=True)
     try:
-        
         cursor.execute("""
             SELECT p.screening_date, p.screening_time, t.name AS theater_name, f.title AS film_title, p.seats
             FROM purchases p
@@ -899,14 +888,6 @@ def chronology():
         cursor.close()  
         connection.close()
 
-'''
-{
-    "user": {
-        "id": 1
-    }
-}
-'''
-
 
 
 #OTTENERE LE INFORMAZIONI DI UN SINGOLO BIGLIETTO DI UN USER
@@ -915,19 +896,22 @@ def get_ticket():
     data = request.get_json()
     user_id = data.get('user_id')
     purchases_id = data.get('purchases_id')
-    
+    seat_requested = data.get('seat')
+
     if not purchases_id:
         return jsonify({'status': 'ERROR', 'message': 'No purchases ID provided'})
     if not user_id:
         return jsonify({'status': 'ERROR', 'message': 'No user ID provided'})
+    if not seat_requested:
+        return jsonify({'status': 'ERROR', 'message': 'No seat provided'})
 
     connection = db.getdb()
     cursor = connection.cursor(dictionary=True)
 
     try:
-       
         cursor.execute("""
-            SELECT p.screening_date, p.screening_time, t.name AS theater_name, f.title AS film_title, p.seats
+            SELECT p.screening_date, p.screening_time, t.name AS theater_name, 
+                   f.title AS film_title, f.url AS film_url, p.seats
             FROM purchases p
             JOIN theater t ON p.theater_id = t.id
             JOIN film f ON p.film_id = f.id
@@ -943,10 +927,13 @@ def get_ticket():
         screening_time = result['screening_time']
         theater_name = result['theater_name']
         film_title = result['film_title']
+        film_url = result['film_url']  # Aggiunto per includere l'URL dell'immagine
         seats = result['seats']
-        seats_list = seats.split(',')
+        seats_list = [seat.strip() for seat in seats.split(',')]
 
-        # Format screening time
+        if seat_requested not in seats_list:
+            return jsonify({'status': 'ERROR', 'message': 'Seat not found in this purchase'})
+
         if isinstance(screening_time, timedelta):
             total_seconds = int(screening_time.total_seconds())
             hours = total_seconds // 3600
@@ -955,13 +942,13 @@ def get_ticket():
         else:
             screening_time_str = screening_time.strftime("%H:%M")
 
-        # Prepare response
         ticket = {
             'screening_date': screening_date.strftime("%Y-%m-%d"),
             'screening_time': screening_time_str,
             'theater': theater_name,
             'film_title': film_title,
-            'seats': [seat.strip() for seat in seats_list]
+            'film_url': film_url,  # Incluso nell'output JSON
+            'seat': seat_requested
         }
 
         return jsonify({'ticket': ticket})
@@ -972,6 +959,7 @@ def get_ticket():
     finally:
         cursor.close()
         connection.close()
+
 
 
 
