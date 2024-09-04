@@ -12,14 +12,14 @@ import random
 from . import db
 from flask_bcrypt import Bcrypt
 from decimal import Decimal
-from datetime import timedelta, datetime 
+from datetime import timedelta 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle
 import qrcode
 import mysql.connector
 from reportlab.pdfgen import canvas
-
+from datetime import datetime
 
 
 bp = Blueprint('pwm', __name__, url_prefix='/pwm')
@@ -658,16 +658,15 @@ def load_films():
 @bp.route('/movie_of_the_week', methods=['GET'])
 def movie_of_the_week():
     try:
-        
         connection = db.getdb()
         cursor = connection.cursor(dictionary=True)
 
-        # Calculate the current week (from Monday to Sunday)
-        today = datetime.date.today()
-        start_of_week = today - datetime.timedelta(days=today.weekday())  # Monday of the current week
-        end_of_week = start_of_week + datetime.timedelta(days=6)  # Sunday of the current week
+        # Calcola la settimana corrente (dal lunedì alla domenica)
+        today = datetime.today().date()  # Ottieni la data odierna
+        start_of_week = today - timedelta(days=today.weekday())  # Lunedì della settimana corrente
+        end_of_week = start_of_week + timedelta(days=6)  # Domenica della settimana corrente
 
-        # Query to get movies with release_date in the current week
+        # Query per ottenere i film con data di rilascio nella settimana corrente
         query = """
             SELECT * FROM film
             WHERE release_date BETWEEN %s AND %s
@@ -675,7 +674,7 @@ def movie_of_the_week():
         cursor.execute(query, (start_of_week, end_of_week))
         films = cursor.fetchall()
 
-       
+        # Crea la lista di film
         films_list = [
             {
                 "id": film["id"],
@@ -685,7 +684,7 @@ def movie_of_the_week():
                 "duration": film["duration"],
                 "url": film["url"],
                 "producer": film["producer"],
-                "release_date": film["release_date"].isoformat()  # Convert to ISO 8601 string
+                "release_date": film["release_date"].isoformat()  # Converti in stringa ISO 8601
             }
             for film in films
         ]
@@ -698,7 +697,6 @@ def movie_of_the_week():
     finally:
         cursor.close()
         connection.close()
-
 
 
 @bp.route('/select_seats_&_buy_tickets', methods=['POST'])
@@ -1115,42 +1113,32 @@ def save_dates():
 '''
 
 
-
-
-
-@bp.route('/load_popular_movie', methods=['GET'])
-def load_popular_movie():
+@bp.route('/load_promo_movie', methods=['GET'])
+def load_promo_movie():
     try:
         connection = db.getdb()
         cursor = connection.cursor(dictionary=True)
 
-       
-        cursor.execute("SELECT film_id FROM popular_movie")
-        popular_film_ids = cursor.fetchall()
+        cursor.execute("SELECT film_id, url, short_description, long_description FROM promo_film")
+        promo_films = cursor.fetchall()
 
-        if not popular_film_ids:
+        if not promo_films:
             return jsonify({'status': 'SUCCESS', 'films': []})
-        
-        
-        film_ids = [row['film_id'] for row in popular_film_ids]
 
-        
+        film_ids = [row['film_id'] for row in promo_films]
+
         cursor.execute("SELECT * FROM film WHERE id IN (%s)" % ','.join(['%s'] * len(film_ids)), film_ids)
         films = cursor.fetchall()
 
         films_list = [
             {
-                "id": film["id"],
                 "title": film["title"],
-                "categories": film["categories"],
-                "plot": film["plot"],
-                "duration": film["duration"],
-                "url": film["url"],
-                "producer": film["producer"],
-                "release_date": film["release_date"],
-                "vote": film["vote"]
+                "url": promo_film["url"],  
+                "short_description": promo_film["short_description"],
+                "long_description": promo_film["long_description"],
+                "image": f"static/img/{promo_film['url']}" 
             }
-            for film in films
+            for film, promo_film in zip(films, promo_films)
         ]
 
         return jsonify({'status': 'SUCCESS', 'films': films_list})
@@ -1161,6 +1149,7 @@ def load_popular_movie():
     finally:
         cursor.close()
         connection.close()
+
 
 
 
