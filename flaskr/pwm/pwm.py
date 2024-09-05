@@ -100,7 +100,7 @@ def signup():
         params = (100, user_id)
         cursor.execute(query, params)
 
-        connection.commit()  # Commit the transaction
+        connection.commit()  
         return jsonify({'status': 'SUCCESS'})
 
     except Exception as e:
@@ -110,7 +110,43 @@ def signup():
         cursor.close()
         connection.close() 
 
+#OTTENERE I DATI DI UN UTENTE TRAMITE ID
+@bp.route('/get_user_info', methods=['POST'])
+def get_user_info():
+    user_id = request.json.get('id')  
+    connection = db.getdb()  
+    try:
+        cursor = connection.cursor()
+        cursor.execute("""
+            SELECT id, name, surname, phone, email
+            FROM users 
+            WHERE id = %s
+        """, (user_id,))
+        
+        user = cursor.fetchone()
+        
+        if not user:
+            return jsonify({'status': 'USER_NOT_FOUND', 'user': None})
+        
+        response = {
+            'status': 'SUCCESS',
+            'user': {
+                
+                'name': user[1],
+                'surname': user[2],
+                'phone': user[3],
+                'email': user[4]
+             
+            }
+        }
+        return jsonify(response)
+    except Exception as e:
+        
+        return jsonify({'status': 'ERROR', 'error': str(e), 'user': None})
+    finally:
+        cursor.close()  
 
+#AGGIUNGERE LA DOMANDA E RIPOSTA DI SICUREZZA
 @bp.route('/add_security_question_and_answer', methods=['POST'])
 def add_security_question_and_answer():
     data = request.get_json()
@@ -166,7 +202,7 @@ def add_security_question_and_answer():
 
 
 
-
+#RIMUOVERE LA DOMANDA E RISPOSTA DI SICUREZZA
 @bp.route('/remove_security_question_and_answer', methods=['POST'])
 def remove_security_question_and_answer():
     data = request.get_json()
@@ -204,7 +240,7 @@ def remove_security_question_and_answer():
         connection.close()
 
 
-
+#AGGIORNARE DOMANDA E RISPOSTA DI SICUREZZA
 @bp.route('/update_security_question_and_answer', methods=['POST'])
 def update_security_question_and_answer():
     data = request.get_json()
@@ -248,7 +284,7 @@ def update_security_question_and_answer():
         connection.close()
 
 
-
+#VERIFICARE SE UN UTENTE HA MESSO LA DOMANDA DI SICUREZZA
 @bp.route('/check_security_question', methods=['POST'])
 def check_security_question():
     data = request.get_json()
@@ -318,7 +354,7 @@ def delete_user():
         cursor.close()
         connection.close() 
 
-
+#MODIFICARE DATI PERSONALI UTENTE
 @bp.route('/update_user', methods=['POST'])
 def update_user():
     data = request.get_json()
@@ -457,7 +493,7 @@ def update_amount():
         connection.close()  
 
 
-
+#CAMBIARE LA MAIL
 @bp.route('/edit_email', methods=['POST'])
 def edit_email():
     data = request.get_json()
@@ -503,7 +539,7 @@ def edit_email():
         cursor.close()
         connection.close()
 
-
+#CAMBIARE PASSWORD
 @bp.route('/edit_password', methods=['POST'])
 def edit_password():
     data = request.get_json()
@@ -550,7 +586,7 @@ def edit_password():
         connection.close()
 
 
-
+#PER CARICARE LE IMMAGINI DEL PROFILO NELL'APP
 @bp.route('/load_images', methods=['GET'])
 def load_images():
     try:
@@ -577,7 +613,7 @@ def load_images():
 
 
 
-
+#LA SCELTA DELL'IMMAGINE PROFILO PER UN UTENTE
 @bp.route('/associate_image', methods=['POST'])
 def associate_image():
     try:
@@ -617,6 +653,42 @@ def associate_image():
 
 
 
+#PER OTTENERE L'IMMAGINE ASSOCIATA AD UN UTENTE
+@bp.route('/get_user_image', methods=['POST'])
+def get_user_image():
+    user_id = request.json.get('user_id') 
+    connection = db.getdb() 
+    try:
+        cursor = connection.cursor()
+        cursor.execute("""
+            SELECT images.image_url 
+            FROM user_images 
+            JOIN images ON user_images.image_id = images.id
+            WHERE user_images.user_id = %s
+        """, (user_id,))
+        
+        image = cursor.fetchone()
+        
+        if not image:
+            
+            return jsonify({'status': 'IMAGE_NOT_FOUND', 'image': None})
+        
+        # Image found, return the URL
+        response = {
+            'status': 'SUCCESS',
+            'image_url': image[0]
+        }
+        return jsonify(response)
+    except Exception as e:
+        # Error handling
+        return jsonify({'status': 'ERROR', 'error': str(e), 'image': None})
+    finally:
+        cursor.close() 
+
+
+
+
+#CARICARE I FILM NELL'APP
 @bp.route('/load_films', methods=['GET'])
 def load_films():
     try:
@@ -654,7 +726,7 @@ def load_films():
         connection.close()
 
 
-#PER I FILM IN HOME
+#PER CARICARE I FILM IN HOME
 @bp.route('/movie_of_the_week', methods=['GET'])
 def movie_of_the_week():
     try:
@@ -698,7 +770,7 @@ def movie_of_the_week():
         cursor.close()
         connection.close()
 
-
+#SELEZIONARE TUTTE LE INFO CHE COMPORRANNO UN BIGLIETTO E ACQUISTARLO
 @bp.route('/select_seats_&_buy_tickets', methods=['POST'])
 def select_seats_and_buy_tickets():
     data = request.get_json()
@@ -962,7 +1034,7 @@ def get_ticket():
 
 
 
-
+#LA SCELTA DI UN UTENTE DI SPENDERE I SUOI PUNTI PER SALIRE DI LIVELLO
 @bp.route('/user_level_increase', methods=['POST'])
 def user_level_increase():
     data = request.get_json()
@@ -1112,7 +1184,7 @@ def save_dates():
 
 '''
 
-
+#PER CARICARE I FILM IN PROMO NELLA HOME
 @bp.route('/load_promo_movie', methods=['GET'])
 def load_promo_movie():
     try:
@@ -1135,8 +1207,7 @@ def load_promo_movie():
                 "title": film["title"],
                 "url": promo_film["url"],  
                 "short_description": promo_film["short_description"],
-                "long_description": promo_film["long_description"],
-                "image": f"static/img/{promo_film['url']}" 
+                "long_description": promo_film["long_description"]
             }
             for film, promo_film in zip(films, promo_films)
         ]
@@ -1152,7 +1223,7 @@ def load_promo_movie():
 
 
 
-
+#DISTRIBUIRE I FILM NELLE VARIE CATEGORIE NELL'APP
 @bp.route('/films_by_category', methods=['POST'])
 def films_by_category():
     
@@ -1487,7 +1558,7 @@ def download_pdf():
 '''
 
 
-
+#SELEZIONARE UN POPCORN E COMPRARLO
 @bp.route('/select_popcorn_and_buy_item', methods=['POST'])
 def select_popcorn_and_buy_item():
     data = request.get_json()
@@ -1547,7 +1618,7 @@ def select_popcorn_and_buy_item():
 
 
 
-
+#SELEZIONARE UN DRINK E COMPRARLO
 @bp.route('/select_drink_and_buy_item', methods=['POST'])
 def select_drink_and_buy_item():
     data = request.get_json()
@@ -1608,7 +1679,7 @@ def select_drink_and_buy_item():
 
 
 
-
+#SELEZIONARE UNA COMBO E COMPRARLA
 @bp.route('/select_combo_and_buy_item', methods=['POST'])
 def select_combo_and_buy_item():
     data = request.get_json()
@@ -1780,12 +1851,12 @@ def get_items():
         cursor.close()
         connection.close()
 
-
+#SELEZIONARE UNO SCONTO TRA  'free_ticket' O 'ticket_discount'
 @bp.route('/select_discounts', methods=['POST'])
 def select_discounts():
     data = request.get_json()
     user_id = data.get('user_id')
-    reward_type = data.get('reward_type')  # Should be either 'free_ticket' or 'ticket_discount'
+    reward_type = data.get('reward_type')  # 'free_ticket' or 'ticket_discount'
 
     if not all([user_id, reward_type]):
         return jsonify({'status': 'ERROR', 'message': 'User ID and reward type are required'})
@@ -1837,7 +1908,7 @@ def select_discounts():
         cursor.close()
         connection.close()
 
-
+#PER OTTENERE IL NUMERO DI  'free_ticket' O 'ticket_discount' POSSEDUTI DA UN UTENTE
 @bp.route('/get_rewards', methods=['POST'])
 def get_rewards():
     data = request.get_json()
@@ -1880,7 +1951,7 @@ def get_rewards():
         connection.close()
 
 
-
+#APPLICARE/USARE UNO SCONTO TRA  'free_ticket' O 'ticket_discount'
 @bp.route('/use_reward', methods=['POST'])
 def use_reward():
     data = request.get_json()
