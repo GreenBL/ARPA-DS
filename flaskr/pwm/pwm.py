@@ -1191,7 +1191,7 @@ def load_promo_movie():
         connection = db.getdb()
         cursor = connection.cursor(dictionary=True)
 
-        cursor.execute("SELECT film_id, url, short_description, long_description FROM promo_film")
+        cursor.execute("SELECT film_id, url_promo, short_description, long_description FROM promo_film")
         promo_films = cursor.fetchall()
 
         if not promo_films:
@@ -1199,13 +1199,14 @@ def load_promo_movie():
 
         film_ids = [row['film_id'] for row in promo_films]
 
-        cursor.execute("SELECT * FROM film WHERE id IN (%s)" % ','.join(['%s'] * len(film_ids)), film_ids)
+        cursor.execute("SELECT id, title, url FROM film WHERE id IN (%s)" % ','.join(['%s'] * len(film_ids)), film_ids)
         films = cursor.fetchall()
 
         films_list = [
             {
                 "title": film["title"],
-                "url": promo_film["url"],  
+                "url": film["url"],  
+                "promo_url": promo_film["url_promo"],  
                 "short_description": promo_film["short_description"],
                 "long_description": promo_film["long_description"]
             }
@@ -1220,6 +1221,50 @@ def load_promo_movie():
     finally:
         cursor.close()
         connection.close()
+
+#PER OTTENERE LE INFO DI UN SINGOLO FILM DELLA SEZIONE PROMO 
+@bp.route('/promo_movie', methods=['POST'])
+def get_promo_movie_by_promo_id():
+    try:
+        connection = db.getdb()
+        cursor = connection.cursor(dictionary=True)
+
+        data = request.get_json()
+        promo_id = data.get('promo_id')
+
+        if not promo_id:
+            return jsonify({'status': 'ERROR', 'message': 'ID del promo non fornito'})
+
+        query = """
+            SELECT promo_film.url_promo, promo_film.short_description, promo_film.long_description, 
+                   film.title, film.url
+            FROM promo_film
+            JOIN film ON promo_film.film_id = film.id
+            WHERE promo_film.id = %s
+        """
+        cursor.execute(query, (promo_id,))
+        promo_film = cursor.fetchone()
+
+        if not promo_film:
+            return jsonify({'status': 'ERROR', 'message': 'Promo film non trovato'})
+
+        film_data = {
+            "title": promo_film["title"],
+            "url": promo_film["url"], 
+            "promo_url": promo_film["url_promo"],  
+            "short_description": promo_film["short_description"],
+            "long_description": promo_film["long_description"]
+        }
+
+        return jsonify({'status': 'SUCCESS', 'film': film_data})
+
+    except Exception as e:
+        return jsonify({'status': 'ERROR', 'message': str(e)})
+
+    finally:
+        cursor.close()
+        connection.close()
+
 
 
 
