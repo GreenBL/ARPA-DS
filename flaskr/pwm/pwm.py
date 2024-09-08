@@ -756,7 +756,8 @@ def movie_of_the_week():
                 "duration": film["duration"],
                 "url": film["url"],
                 "producer": film["producer"],
-                "release_date": film["release_date"].isoformat()  # Converti in stringa ISO 8601
+                "release_date": film["release_date"].isoformat(),  # Converti in stringa ISO 8601
+                "vote": film["vote"]
             }
             for film in films
         ]
