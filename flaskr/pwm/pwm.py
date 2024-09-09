@@ -1272,7 +1272,6 @@ def get_promo_movie_by_promo_id():
 #DISTRIBUIRE I FILM NELLE VARIE CATEGORIE NELL'APP
 @bp.route('/films_by_category', methods=['POST'])
 def films_by_category():
-    
     data = request.get_json()
 
     # Check if the 'category' field is present
@@ -1290,11 +1289,12 @@ def films_by_category():
         cursor.execute(query, (pattern,))
         films = cursor.fetchall()
 
+        # Remove the split of 'categories' to keep it as a string
         films_list = [
             {
                 "id": film["id"],
                 "title": film["title"],
-                "categories": film["categories"].split(','),
+                "categories": film["categories"],  
                 "plot": film["plot"],
                 "duration": film["duration"],
                 "url": film["url"],
@@ -1307,13 +1307,13 @@ def films_by_category():
 
         return jsonify({'status': 'SUCCESS', 'films': films_list})
 
-
     except Exception as e:
         return jsonify({'status': 'ERROR', 'message': str(e)})
 
     finally:
         cursor.close()
         connection.close()
+
 
 
 
