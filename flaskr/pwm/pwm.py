@@ -11,7 +11,7 @@ import string
 import random
 from . import db
 from flask_bcrypt import Bcrypt
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from datetime import timedelta 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -109,6 +109,7 @@ def signup():
     finally:
         cursor.close()
         connection.close() 
+
 
 #OTTENERE I DATI DI UN UTENTE TRAMITE ID
 @bp.route('/get_user_info', methods=['POST'])
@@ -771,28 +772,72 @@ def movie_of_the_week():
         cursor.close()
         connection.close()
 
+
+#VEDERE I POSTI GIA' OCCUPATI DI UNA DETERMINATA SALA
+@bp.route('/occupied_seats', methods=['POST'])
+def occupied_seats():
+    data = request.get_json()
+    if not data:
+        return jsonify({'status': 'ERROR', 'message': 'No data provided'})
+
+    theater_id = data.get('theater_id')
+    screening_date = data.get('screening_date')
+    screening_time = data.get('screening_time')
+
+    if not all([theater_id, screening_date, screening_time]):
+        return jsonify({'status': 'ERROR', 'message': 'Theater ID, screening date, and screening time are required'})
+
+    connection = db.getdb()
+    try:
+        cursor = connection.cursor(dictionary=True)  
+
+        # Query to fetch occupied seats for the specified theater, date, and time
+        query = """
+            SELECT s.seat_code
+            FROM seat_status ss
+            JOIN seat s ON ss.seat_id = s.id
+            WHERE s.theater_id = %s
+              AND ss.is_occupied = TRUE
+              AND ss.screening_date = %s
+              AND ss.screening_time = %s
+        """
+        cursor.execute(query, (theater_id, screening_date, screening_time))
+        occupied_seats = cursor.fetchall()
+
+        # Format the result
+        occupied_seats_list = [row['seat_code'] for row in occupied_seats]
+
+        return jsonify({'status': 'SUCCESS', 'Occupied seats:': occupied_seats_list})
+    except Exception as e:
+        connection.rollback()
+        return jsonify({'status': 'ERROR', 'message': str(e)})
+    finally:
+        cursor.close()
+        connection.close()
+
+
 #SELEZIONARE TUTTE LE INFO CHE COMPORRANNO UN BIGLIETTO E ACQUISTARLO
 @bp.route('/select_seats_&_buy_tickets', methods=['POST'])
 def select_seats_and_buy_tickets():
     data = request.get_json()
-    
+
     user_id = data.get('user_id')
     film_id = data.get('film_id')
     theater_id = data.get('theater_id')
     screening_date = data.get('screening_date')
     screening_time = data.get('screening_time')
     selected_seats = data.get('selected_seats')
-    
+
     if not all([user_id, film_id, theater_id, screening_date, screening_time, selected_seats]):
         return jsonify({'status': 'ERROR', 'message': 'Missing required data'})
 
     connection = db.getdb()
     cursor = connection.cursor(dictionary=True)
-    
+
     try:
         connection.start_transaction()
 
-        # Check if the theater is full
+        # Controllo se il teatro è pieno
         cursor.execute("SELECT seat_count, available, is_full FROM theater WHERE id = %s", (theater_id,))
         theater = cursor.fetchone()
         if not theater:
@@ -801,7 +846,19 @@ def select_seats_and_buy_tickets():
         if theater['is_full']:
             return jsonify({'status': 'ERROR', 'message': 'Theater is fully booked'})
 
-        # Retrieve seat IDs based on seat codes
+        # Recupero i posti occupati attualmente per la sala selezionata
+        cursor.execute("""
+            SELECT s.seat_code
+            FROM seat_status ss
+            JOIN seat s ON ss.seat_id = s.id
+            WHERE s.theater_id = %s
+              AND ss.is_occupied = TRUE
+              AND ss.screening_date = %s
+              AND ss.screening_time = %s
+        """, (theater_id, screening_date, screening_time))
+        occupied_seats = [row['seat_code'] for row in cursor.fetchall()]
+
+        # Verifica se ci sono posti già occupati tra quelli selezionati dall'utente
         seat_placeholders = ', '.join(['%s'] * len(selected_seats))
         cursor.execute(f"""
             SELECT id, seat_code FROM seat 
@@ -809,7 +866,6 @@ def select_seats_and_buy_tickets():
         """, (*selected_seats, theater_id))
         seat_ids = {row['seat_code']: row['id'] for row in cursor.fetchall()}
 
-        # Check if any selected seats are already occupied
         seat_ids_placeholder = ', '.join(['%s'] * len(seat_ids))
         cursor.execute(f"""
             SELECT seat_id FROM seat_status 
@@ -819,7 +875,7 @@ def select_seats_and_buy_tickets():
         occupied_seat_ids = {row['seat_id'] for row in cursor.fetchall()}
 
         if occupied_seat_ids:
-            return jsonify({'status': 'ERROR', 'message': 'Some seats are already occupied'})
+            return jsonify({'status': 'ERROR', 'message': 'Some seats are already occupied', 'occupied_seats': occupied_seats})
 
         # Calculate total price
         seat_count_total = len(selected_seats)
@@ -896,6 +952,96 @@ def select_seats_and_buy_tickets():
 
 
 
+#OTTENERE LE DATE DEL FILM SCELTO TRAMITE FILM_ID
+@bp.route('/get_screening_dates', methods=['POST'])
+def get_screening_dates():
+    data = request.get_json()
+    
+    film_id = data.get('film_id')
+    
+    if not film_id:
+        return jsonify({'status': 'ERROR', 'message': 'Missing film_id'})
+    
+    connection = db.getdb()
+    cursor = connection.cursor(dictionary=True)
+    
+    try:
+       
+        query = """
+            SELECT date
+            FROM screening
+            WHERE film_id = %s
+        """
+        cursor.execute(query, (film_id,))
+        screenings = cursor.fetchall()
+        
+        if not screenings:
+            return jsonify({'status': 'ERROR', 'message': 'No screenings found for the selected film'})
+        
+      
+        screening_dates = [
+            {
+                
+                'date': screening['date'].isoformat()  
+            } 
+            for screening in screenings
+        ]
+        
+        return jsonify({'status': 'SUCCESS', 'screening_dates': screening_dates})
+    
+    except Exception as e:
+        return jsonify({'status': 'ERROR', 'message': f'An error occurred: {str(e)}'})
+    
+    finally:
+        cursor.close()
+        connection.close()
+
+
+
+#OTTENERE GLI ORATI DEL FILM SCELTO TRAMITE FILM_ID
+@bp.route('/get_screening_start', methods=['POST'])
+def get_screening_start():
+    data = request.get_json()
+    
+    film_id = data.get('film_id')
+    
+    if not film_id:
+        return jsonify({'status': 'ERROR', 'message': 'Missing film_id'})
+    
+    connection = db.getdb()
+    cursor = connection.cursor(dictionary=True)
+    
+    try:
+        # Query per ottenere l'orario di inizio degli spettacoli
+        query = """
+            SELECT scrining_start
+            FROM screening
+            WHERE film_id = %s
+        """
+        cursor.execute(query, (film_id,))
+        screenings = cursor.fetchall()
+        
+        if not screenings:
+            return jsonify({'status': 'ERROR', 'message': 'No screenings found for the selected film'})
+        
+        # Formatta l'orario senza secondi
+        screening_start = [
+            {
+                'time': (datetime.min + screening['scrining_start']).strftime('%H:%M')
+            } 
+            for screening in screenings
+        ]
+        
+        return jsonify({'status': 'SUCCESS', 'screening_start': screening_start})
+    
+    except Exception as e:
+        return jsonify({'status': 'ERROR', 'message': f'An error occurred: {str(e)}'})
+    
+    finally:
+        cursor.close()
+        connection.close()
+
+
 
 
 #PER OTTENERE LE INFO DI TUTTI I BIGLIETTI COMPRATI DA UN USER 
@@ -911,7 +1057,7 @@ def chronology():
     cursor = connection.cursor(dictionary=True)
     try:
         cursor.execute("""
-            SELECT p.screening_date, p.screening_time, t.name AS theater_name, f.title AS film_title, p.seats
+            SELECT p.id AS purchase_id, p.screening_date, p.screening_time, t.name AS theater_name, f.title AS film_title, f.url AS film_url, p.seats
             FROM purchases p
             JOIN theater t ON p.theater_id = t.id
             JOIN film f ON p.film_id = f.id
@@ -930,7 +1076,9 @@ def chronology():
             screening_time = result['screening_time']
             theater_name = result['theater_name']
             film_title = result['film_title']
+            film_url = result['film_url']
             seats = result['seats'].split(',')
+            purchase_id = result['purchase_id']
 
             if isinstance(screening_time, timedelta):
                 total_seconds = int(screening_time.total_seconds())
@@ -942,15 +1090,17 @@ def chronology():
 
             for seat in seats:
                 ticket = {
+                    'purchase_id': purchase_id,
                     'screening_date': screening_date.strftime("%Y-%m-%d"),
                     'screening_time': screening_time_str,
                     'theater': theater_name,
                     'film_title': film_title,
+                    'film_url': film_url,
                     'seat': seat.strip()
                 }
                 tickets.append(ticket)
 
-        return jsonify({'user_id': user_id, 'tickets': tickets})
+        return jsonify({'status': 'SUCCESS', 'tickets': tickets})
 
     except Exception as e:
         return jsonify({'status': 'ERROR', 'message': str(e)})
@@ -961,75 +1111,57 @@ def chronology():
 
 
 
-#OTTENERE LE INFORMAZIONI DI UN SINGOLO BIGLIETTO DI UN USER
-@bp.route('/get_ticket', methods=['POST'])
-def get_ticket():
-    data = request.get_json()
-    user_id = data.get('user_id')
-    purchases_id = data.get('purchases_id')
-    seat_requested = data.get('seat')
 
-    if not purchases_id:
-        return jsonify({'status': 'ERROR', 'message': 'No purchases ID provided'})
-    if not user_id:
-        return jsonify({'status': 'ERROR', 'message': 'No user ID provided'})
-    if not seat_requested:
-        return jsonify({'status': 'ERROR', 'message': 'No seat provided'})
-
-    connection = db.getdb()
-    cursor = connection.cursor(dictionary=True)
-
+#PER GENERARE IL QRCODE
+@bp.route('/qrcodegen', methods=['GET'])
+def generate_qr_code():
+    ticket_id = request.args.get('ticket_id')
+    
+    if not ticket_id:
+        return abort(400, description="Missing 'ticket_id' in request parameters.")
+    
     try:
-        cursor.execute("""
-            SELECT p.screening_date, p.screening_time, t.name AS theater_name, 
-                   f.title AS film_title, f.url AS film_url, p.seats
-            FROM purchases p
-            JOIN theater t ON p.theater_id = t.id
-            JOIN film f ON p.film_id = f.id
-            WHERE p.id = %s AND p.user_id = %s
-        """, (purchases_id, user_id))
+        ticket_id = int(ticket_id)
+    except ValueError:
+        return abort(400, description="Invalid 'ticket_id' format. It should be an integer.")
+    
+    seat_id = get_seat_id(ticket_id)
+    
+    if seat_id is None:
+        return abort(404, description="Ticket ID not found.")
+    
+    seat_id_str = str(seat_id)
+    
+    if len(seat_id_str) > 32: 
+        return abort(400, description="Seat ID is too long. The total length must be 32 characters.") 
+    
+    random_part_length = 32 - len(seat_id_str) 
+    random_part = generate_random_string(random_part_length)
+    
+    string_to_qr = seat_id_str + random_part
+    
+    # Generate the QR code
+    qr = qrcode.QRCode(
+        version=1,  # controls the size of the QR code (1 is the smallest)
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,  # size of each box in the QR code
+        border=4,  # thickness of the border
+    )
+    
+    qr.add_data(string_to_qr)
+    qr.make(fit=True)
+    
+    # Create an image from the QR code
+    img = qr.make_image(fill="black", back_color="white")
+    
+    # Save the image to a BytesIO object
+    img_io = io.BytesIO()
+    img.save(img_io, 'PNG')
+    img_io.seek(0)
+    
+    # Return the QR code as a PNG image
+    return send_file(img_io, mimetype='image/png')
 
-        result = cursor.fetchone()
-
-        if not result:
-            return jsonify({'status': 'ERROR', 'message': 'No ticket found for this ID and user'})
-
-        screening_date = result['screening_date']
-        screening_time = result['screening_time']
-        theater_name = result['theater_name']
-        film_title = result['film_title']
-        film_url = result['film_url']  # Aggiunto per includere l'URL dell'immagine
-        seats = result['seats']
-        seats_list = [seat.strip() for seat in seats.split(',')]
-
-        if seat_requested not in seats_list:
-            return jsonify({'status': 'ERROR', 'message': 'Seat not found in this purchase'})
-
-        if isinstance(screening_time, timedelta):
-            total_seconds = int(screening_time.total_seconds())
-            hours = total_seconds // 3600
-            minutes = (total_seconds % 3600) // 60
-            screening_time_str = f"{hours:02}:{minutes:02}"
-        else:
-            screening_time_str = screening_time.strftime("%H:%M")
-
-        ticket = {
-            'screening_date': screening_date.strftime("%Y-%m-%d"),
-            'screening_time': screening_time_str,
-            'theater': theater_name,
-            'film_title': film_title,
-            'film_url': film_url,  # Incluso nell'output JSON
-            'seat': seat_requested
-        }
-
-        return jsonify({'ticket': ticket})
-
-    except Exception as e:
-        return jsonify({'status': 'ERROR', 'message': str(e)})
-
-    finally:
-        cursor.close()
-        connection.close()
 
 
 
@@ -1070,50 +1202,6 @@ def user_level_increase():
             return jsonify({'status': 'SUCCESS', 'message': 'Points reset and level incremented'})
         else:
             return jsonify({'status': 'ERROR', 'message': 'User has not reached 1000 points yet'})
-    except Exception as e:
-        connection.rollback()
-        return jsonify({'status': 'ERROR', 'message': str(e)})
-    finally:
-        cursor.close()
-        connection.close()
-
-
-
-#VEDERE I POSTI GIA' OCCUPATI DI UNA DETERMINATA SALA
-@bp.route('/occupied_seats', methods=['POST'])
-def occupied_seats():
-    data = request.get_json()
-    if not data:
-        return jsonify({'status': 'ERROR', 'message': 'No data provided'})
-
-    theater_id = data.get('theater_id')
-    screening_date = data.get('screening_date')
-    screening_time = data.get('screening_time')
-
-    if not all([theater_id, screening_date, screening_time]):
-        return jsonify({'status': 'ERROR', 'message': 'Theater ID, screening date, and screening time are required'})
-
-    connection = db.getdb()
-    try:
-        cursor = connection.cursor(dictionary=True)  
-
-        # Query to fetch occupied seats for the specified theater, date, and time
-        query = """
-            SELECT s.seat_code
-            FROM seat_status ss
-            JOIN seat s ON ss.seat_id = s.id
-            WHERE s.theater_id = %s
-              AND ss.is_occupied = TRUE
-              AND ss.screening_date = %s
-              AND ss.screening_time = %s
-        """
-        cursor.execute(query, (theater_id, screening_date, screening_time))
-        occupied_seats = cursor.fetchall()
-
-        # Format the result
-        occupied_seats_list = [row['seat_code'] for row in occupied_seats]
-
-        return jsonify({'status': 'SUCCESS', 'Occupied seats:': occupied_seats_list})
     except Exception as e:
         connection.rollback()
         return jsonify({'status': 'ERROR', 'message': str(e)})
@@ -1222,6 +1310,8 @@ def load_promo_movie():
     finally:
         cursor.close()
         connection.close()
+
+
 
 #PER OTTENERE LE INFO DI UN SINGOLO FILM DELLA SEZIONE PROMO 
 @bp.route('/promo_movie', methods=['POST'])
@@ -1897,6 +1987,8 @@ def get_items():
         cursor.close()
         connection.close()
 
+
+
 #SELEZIONARE UNO SCONTO TRA  'free_ticket' O 'ticket_discount'
 @bp.route('/select_discounts', methods=['POST'])
 def select_discounts():
@@ -1953,6 +2045,7 @@ def select_discounts():
     finally:
         cursor.close()
         connection.close()
+
 
 #PER OTTENERE IL NUMERO DI  'free_ticket' O 'ticket_discount' POSSEDUTI DA UN UTENTE
 @bp.route('/get_rewards', methods=['POST'])
@@ -2046,3 +2139,4 @@ def use_reward():
     finally:
         cursor.close()
         connection.close()
+        
