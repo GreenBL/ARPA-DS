@@ -7,3 +7,6 @@ MarkupSafe==2.1.5
 mysql-connector-python==8.4.0
 Werkzeug==3.0.3
 flask-bcrypt
+barcode
+reportlab
+qrcode
