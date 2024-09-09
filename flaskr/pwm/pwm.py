@@ -1049,7 +1049,7 @@ def chronology():
     if not user_id:
         return jsonify({'status': 'ERROR', 'message': 'No user ID provided'})
 
-    connection = db.getdb()  
+    connection = db.getdb()
     cursor = connection.cursor(dictionary=True)
     
     try:
@@ -1078,13 +1078,22 @@ def chronology():
             purchase_id = result['purchase_id']
 
             
-            screening_date_str = screening_date.strftime("%Y-%m-%d") 
-            screening_time_str = screening_time.strftime("%H:%M:%S") 
+            screening_date_str = screening_date.isoformat()
+
+           
+            if isinstance(screening_time, timedelta):
+                total_seconds = int(screening_time.total_seconds())
+                hours, remainder = divmod(total_seconds, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                screening_time_str = f"{hours:02}:{minutes:02}:{seconds:02}"
+            else:
+             
+                screening_time_str = str(screening_time)
 
             for seat in seats:
                 ticket = {
                     'purchase_id': purchase_id,
-                    'screening_date': screening_date.strftime("%Y-%m-%d"),
+                    'screening_date': screening_date_str,
                     'screening_time': screening_time_str,
                     'theater': theater_name,
                     'film_title': film_title,
@@ -1099,7 +1108,7 @@ def chronology():
         return jsonify({'status': 'ERROR', 'message': str(e)})
 
     finally:
-        cursor.close()  
+        cursor.close()
         connection.close()
 
 
