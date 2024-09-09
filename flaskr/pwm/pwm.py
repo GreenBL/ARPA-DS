@@ -770,7 +770,6 @@ def movie_of_the_week():
         connection.close()
 
 
-<<<<<<< HEAD
 #VEDERE I POSTI GIA' OCCUPATI DI UNA DETERMINATA SALA
 @bp.route('/occupied_seats', methods=['POST'])
 def occupied_seats():
@@ -814,8 +813,6 @@ def occupied_seats():
         connection.close()
 
 
-=======
->>>>>>> a5fbe1561aedbb6d6760313268e9a24dc6e34e79
 #SELEZIONARE TUTTE LE INFO CHE COMPORRANNO UN BIGLIETTO E ACQUISTARLO
 @bp.route('/select_seats_&_buy_tickets', methods=['POST'])
 def select_seats_and_buy_tickets():
@@ -837,11 +834,7 @@ def select_seats_and_buy_tickets():
     try:
         connection.start_transaction()
 
-<<<<<<< HEAD
         # Controllo se il teatro è pieno
-=======
-        # Verifica se il teatro è pieno
->>>>>>> a5fbe1561aedbb6d6760313268e9a24dc6e34e79
         cursor.execute("SELECT seat_count, available, is_full FROM theater WHERE id = %s", (theater_id,))
         theater = cursor.fetchone()
         if not theater:
@@ -850,7 +843,6 @@ def select_seats_and_buy_tickets():
         if theater['is_full']:
             return jsonify({'status': 'ERROR', 'message': 'Theater is fully booked'})
 
-<<<<<<< HEAD
         # Recupero i posti occupati attualmente per la sala selezionata
         cursor.execute("""
             SELECT s.seat_code
@@ -864,9 +856,6 @@ def select_seats_and_buy_tickets():
         occupied_seats = [row['seat_code'] for row in cursor.fetchall()]
 
         # Verifica se ci sono posti già occupati tra quelli selezionati dall'utente
-=======
-        # Recupera gli ID dei posti in base ai codici dei posti
->>>>>>> a5fbe1561aedbb6d6760313268e9a24dc6e34e79
         seat_placeholders = ', '.join(['%s'] * len(selected_seats))
         cursor.execute(f"""
             SELECT id, seat_code FROM seat 
@@ -874,10 +863,6 @@ def select_seats_and_buy_tickets():
         """, (*selected_seats, theater_id))
         seat_ids = {row['seat_code']: row['id'] for row in cursor.fetchall()}
 
-<<<<<<< HEAD
-=======
-        # Verifica se alcuni dei posti selezionati sono già occupati
->>>>>>> a5fbe1561aedbb6d6760313268e9a24dc6e34e79
         seat_ids_placeholder = ', '.join(['%s'] * len(seat_ids))
         cursor.execute(f"""
             SELECT seat_id FROM seat_status 
@@ -1098,12 +1083,8 @@ def chronology():
 
             for seat in seats:
                 ticket = {
-<<<<<<< HEAD
                     'purchase_id': purchase_id,
                     'screening_date': screening_date.strftime("%Y-%m-%d"),
-=======
-                    'screening_date': screening_date_str,
->>>>>>> a5fbe1561aedbb6d6760313268e9a24dc6e34e79
                     'screening_time': screening_time_str,
                     'theater': theater_name,
                     'film_title': film_title,
@@ -1174,45 +1155,6 @@ def generate_qr_code():
     # Return the QR code as a PNG image
     return send_file(img_io, mimetype='image/png')
 
-<<<<<<< HEAD
-=======
-        result = cursor.fetchone()
-
-        if not result:
-            return jsonify({'status': 'ERROR', 'message': 'No ticket found for this ID and user'})
-
-        screening_date = result['screening_date']
-        screening_time = result['screening_time']
-        theater_name = result['theater_name']
-        film_title = result['film_title']
-        film_url = result['film_url'] 
-        seats = result['seats']
-        seats_list = [seat.strip() for seat in seats.split(',')]
-
-        if seat_requested not in seats_list:
-            return jsonify({'status': 'ERROR', 'message': 'Seat not found in this purchase'})
-
-        screening_date_str = screening_date.strftime("%Y-%m-%d")  
-        screening_time_str = screening_time.strftime("%H:%M:%S")  
-
-        ticket = {
-            'screening_date': screening_date_str,
-            'screening_time': screening_time_str,
-            'theater': theater_name,
-            'film_title': film_title,
-            'film_url': film_url, 
-            'seat': seat_requested
-        }
-
-        return jsonify({'ticket': ticket})
-
-    except Exception as e:
-        return jsonify({'status': 'ERROR', 'message': str(e)})
-
-    finally:
-        cursor.close()
-        connection.close()
->>>>>>> a5fbe1561aedbb6d6760313268e9a24dc6e34e79
 
 
 
@@ -1261,111 +1203,6 @@ def user_level_increase():
 
 
 
-<<<<<<< HEAD
-=======
-#VEDERE I POSTI GIA' OCCUPATI DI UNA DETERMINATA SALA
-@bp.route('/occupied_seats', methods=['POST'])
-def occupied_seats():
-    data = request.get_json()
-    if not data:
-        return jsonify({'status': 'ERROR', 'message': 'No data provided'})
-
-    theater_id = data.get('theater_id')
-    screening_date = data.get('screening_date')
-    screening_time = data.get('screening_time')
-
-    if not all([theater_id, screening_date, screening_time]):
-        return jsonify({'status': 'ERROR', 'message': 'Theater ID, screening date, and screening time are required'})
-
-    connection = db.getdb()
-    try:
-        cursor = connection.cursor(dictionary=True)  
-
-        query = """
-            SELECT s.seat_code
-            FROM seat_status ss
-            JOIN seat s ON ss.seat_id = s.id
-            WHERE s.theater_id = %s
-              AND ss.is_occupied = TRUE
-              AND ss.screening_date = %s
-              AND ss.screening_time = %s
-        """
-        cursor.execute(query, (theater_id, screening_date, screening_time))
-        occupied_seats = cursor.fetchall()
-
-        # Format the result
-        occupied_seats_list = [row['seat_code'] for row in occupied_seats]
-
-        return jsonify({'status': 'SUCCESS', 'occupied_seats': occupied_seats_list})
-    except Exception as e:
-        return jsonify({'status': 'ERROR', 'message': str(e)})
-    finally:
-        cursor.close()
-        connection.close()
-
-
->>>>>>> a5fbe1561aedbb6d6760313268e9a24dc6e34e79
-'''
-#NON PRENDERE IN CONSIDERAZIONE
-import random
-from datetime import date, timedelta
-import logging
-from flask import jsonify, request, Blueprint
-
-
-def save_random_screening_dates(film_id, theater_id):
-    connection = db.getdb()
-    cursor = connection.cursor(dictionary=True)
-
-    try:
-        # Ottieni la data di oggi e calcola l'inizio e la fine della settimana
-        today = date.today()  # usando 'date' direttamente invece di 'datetime.date'
-        start_of_week = today - timedelta(days=today.weekday())
-        end_of_week = start_of_week + timedelta(days=6)
-
-        # Genera 3 date casuali all'interno della settimana corrente
-        random_dates = random.sample([start_of_week + timedelta(days=i) for i in range(7)], 3)
-
-        # Inserisci le date casuali nella tabella screening
-        for random_date in random_dates:
-            cursor.execute("""
-                INSERT INTO screening (film_id, theater_id, scrining_start, date) 
-                VALUES (%s, %s, %s, %s)
-            """, (film_id, theater_id, '18:00:00', random_date))
-
-        connection.commit()
-        return jsonify({'status': 'SUCCESS', 'message': 'Random screening dates saved successfully'})
-
-    except Exception as e:
-        connection.rollback()
-        logging.error(f"Error saving screening dates: {str(e)}")
-        return jsonify({'status': 'ERROR', 'message': str(e)})
-
-    finally:
-        cursor.close()
-        connection.close()
-
-@bp.route('/save_random_dates', methods=['POST'])
-def save_dates():
-    data = request.get_json()
-    film_id = data.get('film_id')
-    theater_id = data.get('theater_id')
-
-    if not film_id or not theater_id:
-        return jsonify({'status': 'ERROR', 'message': 'Film ID and Theater ID are required'})
-
-    if not isinstance(film_id, int) or not isinstance(theater_id, int):
-        return jsonify({'status': 'ERROR', 'message': 'Film ID and Theater ID must be integers'})
-
-    return save_random_screening_dates(film_id, theater_id)
-'''
-'''
-{
-  "film_id": 1,
-  "theater_id": 2
-}
-
-'''
 
 #PER CARICARE I FILM IN PROMO NELLA HOME
 @bp.route('/load_promo_movie', methods=['GET'])
@@ -2231,3 +2068,67 @@ def use_reward():
         cursor.close()
         connection.close()
         
+
+
+
+'''
+#NON PRENDERE IN CONSIDERAZIONE
+import random
+from datetime import date, timedelta
+import logging
+from flask import jsonify, request, Blueprint
+
+
+def save_random_screening_dates(film_id, theater_id):
+    connection = db.getdb()
+    cursor = connection.cursor(dictionary=True)
+
+    try:
+        # Ottieni la data di oggi e calcola l'inizio e la fine della settimana
+        today = date.today()  # usando 'date' direttamente invece di 'datetime.date'
+        start_of_week = today - timedelta(days=today.weekday())
+        end_of_week = start_of_week + timedelta(days=6)
+
+        # Genera 3 date casuali all'interno della settimana corrente
+        random_dates = random.sample([start_of_week + timedelta(days=i) for i in range(7)], 3)
+
+        # Inserisci le date casuali nella tabella screening
+        for random_date in random_dates:
+            cursor.execute("""
+                INSERT INTO screening (film_id, theater_id, scrining_start, date) 
+                VALUES (%s, %s, %s, %s)
+            """, (film_id, theater_id, '18:00:00', random_date))
+
+        connection.commit()
+        return jsonify({'status': 'SUCCESS', 'message': 'Random screening dates saved successfully'})
+
+    except Exception as e:
+        connection.rollback()
+        logging.error(f"Error saving screening dates: {str(e)}")
+        return jsonify({'status': 'ERROR', 'message': str(e)})
+
+    finally:
+        cursor.close()
+        connection.close()
+
+@bp.route('/save_random_dates', methods=['POST'])
+def save_dates():
+    data = request.get_json()
+    film_id = data.get('film_id')
+    theater_id = data.get('theater_id')
+
+    if not film_id or not theater_id:
+        return jsonify({'status': 'ERROR', 'message': 'Film ID and Theater ID are required'})
+
+    if not isinstance(film_id, int) or not isinstance(theater_id, int):
+        return jsonify({'status': 'ERROR', 'message': 'Film ID and Theater ID must be integers'})
+
+    return save_random_screening_dates(film_id, theater_id)
+'''
+'''
+{
+  "film_id": 1,
+  "theater_id": 2
+}
+
+'''
