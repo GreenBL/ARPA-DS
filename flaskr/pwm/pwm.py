@@ -418,10 +418,10 @@ def update_user():
 @bp.route('/get_amount', methods=['POST']) 
 def get_amount():
     data = request.get_json()
-    user_id = data.get('user_id') 
+    user_id = data.get('user_id')
     
     if not user_id:
-        return jsonify({'status': 'ERROR', 'message': 'No user ID provided'})
+        return jsonify({'status': 'ERROR', 'message': 'Nessun ID utente fornito'})
 
     connection = db.getdb()  
     cursor = connection.cursor()
@@ -430,18 +430,18 @@ def get_amount():
         result = cursor.fetchone()
 
         if result is None:
-            return jsonify({'status': 'ERROR', 'message': 'Profile not found'})
+            return jsonify({'status': 'ERROR', 'message': 'Profilo non trovato'})
         
-        amount = result[0]  
+        amount = result[0]
 
-        return jsonify({'id': user_id, 'amount': amount})
+        return jsonify({'amount': amount})
 
     except Exception as e:
         return jsonify({'status': 'ERROR', 'message': str(e)})
 
     finally:
-        cursor.close()  
-        connection.close() 
+        cursor.close()
+        connection.close()
 
 
 
@@ -449,16 +449,16 @@ def get_amount():
 @bp.route('/update_amount', methods=['POST'])
 def update_amount():
     data = request.get_json()
-    user_id = data.get('id')
+    user_id = data.get('user_id')
     additional_amount = data.get('amount')
 
     if not user_id or additional_amount is None:
         return jsonify({'status': 'ERROR', 'message': 'User ID and amount are required'})
 
     try:
-        # Convert the additional amount to a Decimal value
-        additional_amount = Decimal(str(additional_amount))
-    except (ValueError, InvalidOperation):
+        # Convert the additional amount to a Double value
+        additional_amount = float(additional_amount)
+    except ValueError:
         return jsonify({'status': 'ERROR', 'message': 'Invalid amount value'})
 
     connection = db.getdb()
@@ -469,29 +469,30 @@ def update_amount():
         result = cursor.fetchone()
 
         if result is None:
-            
+            # Insert new balance record
             cursor.execute("INSERT INTO balance (amount, ref_user) VALUES (%s, %s)", (additional_amount, user_id))
             connection.commit()
             return jsonify({'status': 'SUCCESS', 'message': 'Balance created and amount set successfully'})
 
-        current_amount = result[0] 
+        current_amount = float(result[0])  # Ensure this is a float
 
         # Calculate the new amount
         new_amount = current_amount + additional_amount
 
         # Update the amount
-        query = "UPDATE balance SET amount = %s WHERE ref_user = %s"
-        cursor.execute(query, (new_amount, user_id))
+        cursor.execute("UPDATE balance SET amount = %s WHERE ref_user = %s", (new_amount, user_id))
         connection.commit() 
 
         return jsonify({'status': 'SUCCESS', 'message': 'Amount updated successfully'})
 
     except Exception as e:
-        return jsonify({'status': 'ERROR', 'message': str(e)})
+        connection.rollback()  # Rollback in case of error
+        return jsonify({'status': 'ERROR', 'message': f'An error occurred: {str(e)}'})
 
     finally:
         cursor.close()
-        connection.close()  
+        connection.close()
+
 
 
 #CAMBIARE LA MAIL
