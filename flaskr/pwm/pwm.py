@@ -71,16 +71,17 @@ def signup():
     email = data.get('email')
     password = data.get('password')
 
-    # Check if all required fields are provided
+   
     if not all([name, surname, phone, email, password]):
         return jsonify({'status': 'All fields are required'})
-    connection = db.getdb()  # Get database connection
+    connection = db.getdb()
     cursor = connection.cursor()
     try:
-        # Check if the email is already in use
+    
         cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
         if cursor.fetchone() is not None:
             return jsonify({'status': 'Email already in use'})
+
 
         query = """
             INSERT INTO users (name, surname, phone, email, password) 
@@ -89,7 +90,7 @@ def signup():
         params = (name, surname, phone, email, password)
         cursor.execute(query, params)
 
-        user_id = cursor.lastrowid  # Get the ID of the newly inserted user
+        user_id = cursor.lastrowid  
 
         # Insert a default balance for the new user
         query = """
@@ -97,6 +98,14 @@ def signup():
             VALUES (%s, %s)
         """
         params = (100, user_id)
+        cursor.execute(query, params)
+
+        # Insert into user_images with default image_id 1
+        query = """
+            INSERT INTO user_images (user_id, image_id)
+            VALUES (%s, %s)
+        """
+        params = (user_id, 1)
         cursor.execute(query, params)
 
         connection.commit()  
@@ -145,6 +154,7 @@ def get_user_info():
         return jsonify({'status': 'ERROR', 'error': str(e), 'user': None})
     finally:
         cursor.close()  
+
 
 #AGGIUNGERE LA DOMANDA E RIPOSTA DI SICUREZZA
 @bp.route('/add_security_question_and_answer', methods=['POST'])
@@ -321,13 +331,12 @@ def check_security_question():
         connection.close()
 
 
-#PER OTTENERE IL NUMERO DI DOMANDA DI SICUREZZA TRAMITE EMAIL 
-@bp.route('/get_security_question', methods=['POST'])
-def get_security_question():
+# TRAMITE EMAIL OTTENERE IL NUMERO DI DOMANDA E LA RISPOSTA DI SICUREZZA INSERITA DALL'UTENTE
+@bp.route('/get_security_question_and_answer', methods=['POST'])
+def get_security_question_and_answer():
     data = request.get_json()
-    
+
     email = data.get('email')
-    
     
     if not email:
         return jsonify({'status': 'ERROR', 'message': 'Missing email'})
@@ -338,7 +347,7 @@ def get_security_question():
     try:
        
         query = """
-            SELECT security_question
+            SELECT security_question, security_answer
             FROM users
             WHERE email = %s
         """
@@ -348,10 +357,15 @@ def get_security_question():
         if not user:
             return jsonify({'status': 'ERROR', 'message': 'User not found'})
         
-        
+        # Fetch security question and answer
         security_question = user['security_question']
+        security_answer = user['security_answer']
         
-        return jsonify({'status': 'SUCCESS', 'security_question': security_question})
+        return jsonify({
+            'status': 'SUCCESS', 
+            'security_question': security_question, 
+            'security_answer': security_answer
+        })
     
     except Exception as e:
         return jsonify({'status': 'ERROR', 'message': f'An error occurred: {str(e)}'})
@@ -359,6 +373,7 @@ def get_security_question():
     finally:
         cursor.close()
         connection.close()
+
 
 
 @bp.route('/delete_user', methods=['POST'])
@@ -392,6 +407,7 @@ def delete_user():
     finally:
         cursor.close()
         connection.close() 
+
 
 #MODIFICARE DATI PERSONALI UTENTE
 @bp.route('/update_user', methods=['POST'])
@@ -1363,12 +1379,12 @@ def films_by_category():
             {
                 "id": film["id"],
                 "title": film["title"],
-                "categories": film["categories"],  
+                "categories": film["categories"],
                 "plot": film["plot"],
                 "duration": film["duration"],
                 "url": film["url"],
                 "producer": film["producer"],
-                "release_date": film["release_date"].strftime("%Y-%m-%d") if film["release_date"] else None,  # Convert to ISO 8601
+                "release_date": film["release_date"].isoformat() if film["release_date"] else None,  # Convert to ISO 8601 using isoformat()
                 "vote": film["vote"]
             }
             for film in films
@@ -2120,65 +2136,3 @@ def use_reward():
         
 
 
-
-'''
-#NON PRENDERE IN CONSIDERAZIONE
-import random
-from datetime import date, timedelta
-import logging
-from flask import jsonify, request, Blueprint
-
-
-def save_random_screening_dates(film_id, theater_id):
-    connection = db.getdb()
-    cursor = connection.cursor(dictionary=True)
-
-    try:
-        # Ottieni la data di oggi e calcola l'inizio e la fine della settimana
-        today = date.today()  # usando 'date' direttamente invece di 'datetime.date'
-        start_of_week = today - timedelta(days=today.weekday())
-        end_of_week = start_of_week + timedelta(days=6)
-
-        # Genera 3 date casuali all'interno della settimana corrente
-        random_dates = random.sample([start_of_week + timedelta(days=i) for i in range(7)], 3)
-
-        # Inserisci le date casuali nella tabella screening
-        for random_date in random_dates:
-            cursor.execute("""
-                INSERT INTO screening (film_id, theater_id, scrining_start, date) 
-                VALUES (%s, %s, %s, %s)
-            """, (film_id, theater_id, '18:00:00', random_date))
-
-        connection.commit()
-        return jsonify({'status': 'SUCCESS', 'message': 'Random screening dates saved successfully'})
-
-    except Exception as e:
-        connection.rollback()
-        logging.error(f"Error saving screening dates: {str(e)}")
-        return jsonify({'status': 'ERROR', 'message': str(e)})
-
-    finally:
-        cursor.close()
-        connection.close()
-
-@bp.route('/save_random_dates', methods=['POST'])
-def save_dates():
-    data = request.get_json()
-    film_id = data.get('film_id')
-    theater_id = data.get('theater_id')
-
-    if not film_id or not theater_id:
-        return jsonify({'status': 'ERROR', 'message': 'Film ID and Theater ID are required'})
-
-    if not isinstance(film_id, int) or not isinstance(theater_id, int):
-        return jsonify({'status': 'ERROR', 'message': 'Film ID and Theater ID must be integers'})
-
-    return save_random_screening_dates(film_id, theater_id)
-'''
-'''
-{
-  "film_id": 1,
-  "theater_id": 2
-}
-
-'''
