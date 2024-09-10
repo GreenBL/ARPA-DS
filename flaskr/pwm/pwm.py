@@ -1002,31 +1002,32 @@ def get_screening_start():
     data = request.get_json()
     
     film_id = data.get('film_id')
-    
-    if not film_id:
-        return jsonify({'status': 'ERROR', 'message': 'Missing film_id'})
+    screening_date = data.get('screening_date')  
+   
+    if not film_id or not screening_date:
+        return jsonify({'status': 'ERROR', 'message': 'Missing film_id or screening_date'})
     
     connection = db.getdb()
     cursor = connection.cursor(dictionary=True)
     
     try:
-        # Query per ottenere l'orario di inizio degli spettacoli
+       
         query = """
-            SELECT scrining_start
+            SELECT screening_start, theater_id
             FROM screening
-            WHERE film_id = %s
+            WHERE film_id = %s AND date = %s
         """
-        cursor.execute(query, (film_id,))
+        cursor.execute(query, (film_id, screening_date))
         screenings = cursor.fetchall()
         
         if not screenings:
-            return jsonify({'status': 'ERROR', 'message': 'No screenings found for the selected film'})
+            return jsonify({'status': 'ERROR', 'message': 'No screenings found for the selected film on the specified date'})
         
-        # Formatta l'orario senza secondi
         screening_start = [
             {
-                'time': (datetime.min + screening['scrining_start']).strftime('%H:%M')
-            } 
+                'time': (datetime.min + screening['screening_start']).strftime('%H:%M'),
+                'theater_id': screening['theater_id']
+            }
             for screening in screenings
         ]
         
@@ -1038,6 +1039,7 @@ def get_screening_start():
     finally:
         cursor.close()
         connection.close()
+
 
 
 
