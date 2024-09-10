@@ -5,7 +5,6 @@ from flask import (
 
 from flask import Blueprint, abort, send_file
 import barcode
-from barcode.writer import ImageWriter
 import io
 import string
 import random
