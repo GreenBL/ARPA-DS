@@ -322,6 +322,45 @@ def check_security_question():
         connection.close()
 
 
+#PER OTTENERE IL NUMERO DI DOMANDA DI SICUREZZA TRAMITE EMAIL 
+@bp.route('/get_security_question', methods=['POST'])
+def get_security_question():
+    data = request.get_json()
+    
+    email = data.get('email')
+    
+    
+    if not email:
+        return jsonify({'status': 'ERROR', 'message': 'Missing email'})
+    
+    connection = db.getdb() 
+    cursor = connection.cursor(dictionary=True)
+    
+    try:
+       
+        query = """
+            SELECT security_question
+            FROM users
+            WHERE email = %s
+        """
+        cursor.execute(query, (email,))
+        user = cursor.fetchone()
+        
+        if not user:
+            return jsonify({'status': 'ERROR', 'message': 'User not found'})
+        
+        
+        security_question = user['security_question']
+        
+        return jsonify({'status': 'SUCCESS', 'security_question': security_question})
+    
+    except Exception as e:
+        return jsonify({'status': 'ERROR', 'message': f'An error occurred: {str(e)}'})
+    
+    finally:
+        cursor.close()
+        connection.close()
+
 
 @bp.route('/delete_user', methods=['POST'])
 def delete_user():
