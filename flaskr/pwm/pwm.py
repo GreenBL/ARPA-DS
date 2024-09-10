@@ -5,7 +5,6 @@ from flask import (
 
 from flask import Blueprint, abort, send_file
 import barcode
-from barcode.writer import ImageWriter
 import io
 import string
 import random
@@ -449,13 +448,16 @@ def get_amount():
 @bp.route('/update_amount', methods=['POST'])
 def update_amount():
     data = request.get_json()
-    user_id = data.get('id')
+    user_id = data.get('user_id')
     additional_amount = data.get('amount')
+
+    print(data)
 
     if not user_id or additional_amount is None:
         return jsonify({'status': 'ERROR', 'message': 'User ID and amount are required'})
 
     try:
+        print("converting the add amount")
         # Convert the additional amount to a Decimal value
         additional_amount = Decimal(str(additional_amount))
     except (ValueError, InvalidOperation):
@@ -464,6 +466,7 @@ def update_amount():
     connection = db.getdb()
     cursor = connection.cursor()
     try:
+        print("try catch")
         # Retrieve the current amount for the user
         cursor.execute("SELECT amount FROM balance WHERE ref_user = %s", (user_id,))
         result = cursor.fetchone()
@@ -477,8 +480,9 @@ def update_amount():
         current_amount = result[0] 
 
         # Calculate the new amount
+        print("calculating amount")
         new_amount = current_amount + additional_amount
-
+        print(f'{new_amount} new amount')
         # Update the amount
         query = "UPDATE balance SET amount = %s WHERE ref_user = %s"
         cursor.execute(query, (new_amount, user_id))
@@ -1433,6 +1437,9 @@ def format_time(td):
     hours, minutes = divmod(minutes, 60)
     return f"{hours:02}:{minutes:02}"
 
+
+import os
+
 def draw_background(canvas, doc):
     # Get page dimensions
     page_width, page_height = A4
@@ -1448,10 +1455,17 @@ def draw_background(canvas, doc):
 
     # Calculate the vertical position
     y_position = (page_height - img_height) - space_below_title
+
+        # Get the absolute path to the static images directory
+    base_path = os.path.join(os.path.dirname(__file__), 'static', 'img', 'ArpaLogo.jpeg')
+
+    # Check if the file exists before trying to open it
+    if not os.path.exists(base_path):
+        raise FileNotFoundError(f"The file {base_path} does not exist.")
     
     # Draw the image
     canvas.drawImage(
-        "C:/Users/auror/Downloads/Logo_.jpg",  
+        base_path,  
         x_position,  
         y_position,  
         img_width,   
