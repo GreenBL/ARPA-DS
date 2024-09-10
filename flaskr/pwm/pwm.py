@@ -961,6 +961,7 @@ def get_screening_dates():
     film_id = data.get('film_id')
     
     if not film_id:
+        print("MISSING MOVIE ID")
         return jsonify({'status': 'ERROR', 'message': 'Missing film_id'})
     
     connection = db.getdb()
@@ -977,20 +978,23 @@ def get_screening_dates():
         screenings = cursor.fetchall()
         
         if not screenings:
+    
             return jsonify({'status': 'ERROR', 'message': 'No screenings found for the selected film'})
         
       
         screening_dates = [
             {
                 
-                'date': screening['date'].isoformat()  
+                'date': screening['date'].isoformat() 
             } 
             for screening in screenings
         ]
         
+        print(screening_dates)
         return jsonify({'status': 'SUCCESS', 'screening_dates': screening_dates})
     
     except Exception as e:
+        print(f"EXCEPTION {e}")
         return jsonify({'status': 'ERROR', 'message': f'An error occurred: {str(e)}'})
     
     finally:
