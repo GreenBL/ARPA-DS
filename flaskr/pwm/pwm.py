@@ -6,6 +6,7 @@ from flask import (
 from flask import Blueprint, abort, send_file
 import barcode
 import io
+import os 
 import string
 import random
 from . import db
@@ -345,9 +346,9 @@ def get_security_question_and_answer():
     cursor = connection.cursor(dictionary=True)
     
     try:
-       
+      
         query = """
-            SELECT security_question, security_answer
+            SELECT id, security_question, security_answer
             FROM users
             WHERE email = %s
         """
@@ -357,12 +358,14 @@ def get_security_question_and_answer():
         if not user:
             return jsonify({'status': 'ERROR', 'message': 'User not found'})
         
-        # Fetch security question and answer
+        
+        user_id = user['id']
         security_question = user['security_question']
         security_answer = user['security_answer']
         
         return jsonify({
             'status': 'SUCCESS', 
+            'user_id': user_id,
             'security_question': security_question, 
             'security_answer': security_answer
         })
@@ -1506,9 +1509,16 @@ def draw_background(canvas, doc):
     # Calculate the vertical position
     y_position = (page_height - img_height) - space_below_title
     
+# Get the absolute path to the static images directory
+    base_path = os.path.join(os.path.dirname(__file__), 'static', 'img', 'ArpaLogo.jpg')
+
+    # Check if the file exists before trying to open it
+    if not os.path.exists(base_path):
+        raise FileNotFoundError(f"The file {base_path} does not exist.")
+
     # Draw the image
     canvas.drawImage(
-        "C:/Users/auror/Downloads/Logo_.jpg",  
+        base_path,  
         x_position,  
         y_position,  
         img_width,   
