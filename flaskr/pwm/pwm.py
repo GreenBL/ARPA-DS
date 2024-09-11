@@ -1225,6 +1225,48 @@ def generate_qr_code():
     return send_file(img_io, mimetype='image/png')
 
 
+#OTTENERE PUNTI E LIVELLO ASSOCIATI AD UN UTENTE 
+@bp.route('/get_user_points_and_level', methods=['POST'])
+def get_user_points_and_level():
+    data = request.get_json()
+
+    user_id = data.get('user_id')
+    
+    if not user_id:
+        return jsonify({'status': 'ERROR', 'message': 'Missing user_id'})
+    
+    connection = db.getdb() 
+    cursor = connection.cursor(dictionary=True)
+    
+    try:
+        # Retrieve points and level for the given user_id
+        query = """
+            SELECT points, level
+            FROM users
+            WHERE id = %s
+        """
+        cursor.execute(query, (user_id,))
+        user = cursor.fetchone()
+        
+        if not user:
+            return jsonify({'status': 'ERROR', 'message': 'User not found'})
+        
+        # Fetch points and level
+        points = user['points']
+        level = user['level']
+        
+        return jsonify({
+            'status': 'SUCCESS', 
+            'points': points, 
+            'level': level
+        })
+    
+    except Exception as e:
+        return jsonify({'status': 'ERROR', 'message': f'An error occurred: {str(e)}'})
+    
+    finally:
+        cursor.close()
+        connection.close()
 
 
 
