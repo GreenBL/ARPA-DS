@@ -551,27 +551,24 @@ def update_amount():
         connection.close()
 
 
-
-#CAMBIARE LA MAIL
 @bp.route('/edit_email', methods=['POST'])
 def edit_email():
     data = request.get_json()
-    if not data:
-       
-        return jsonify({'status': 'ERROR'})
 
-    user_id = data.get('id')
+    if not data:
+        return jsonify({'status': 'ERROR', 'message': 'No data provided'})
+
+    user_id = data.get('user_id')
     if not user_id:
-     
-        return jsonify({'status': 'ERROR'})
+        return jsonify({'status': 'ERROR', 'message': 'No user_id provided'})
 
     new_email = data.get('email')
-    
+
     connection = db.getdb()
+    cursor = None
     try:
         cursor = connection.cursor()
 
-        # Prepare the fields to update
         update_fields = []
         update_values = []
 
@@ -579,70 +576,72 @@ def edit_email():
             update_fields.append("email = %s")
             update_values.append(new_email)
         
-       
+        if not update_fields:
+            return jsonify({'status': 'ERROR', 'message': 'No fields to update'})
+
         update_query = f"UPDATE users SET {', '.join(update_fields)} WHERE id = %s"
         update_values.append(user_id)
 
+        print(f'Executing Query: {update_query} with values {tuple(update_values)}')
         cursor.execute(update_query, tuple(update_values))
         connection.commit()
 
         if cursor.rowcount == 0:
-            
-            return jsonify({'status': 'ERROR'})
+            return jsonify({'status': 'ERROR', 'message': 'No rows updated, query might be incorrect or data might not exist'})
 
         return jsonify({'status': 'SUCCESS'})
     except Exception as e:
-        connection.rollback()
-        return jsonify({'status': 'ERROR'})
+        if connection:
+            connection.rollback()
+        print(f'Exception occurred: {e}')
+        return jsonify({'status': 'ERROR', 'message': f'Exception occurred: {str(e)}'})
     finally:
-        cursor.close()
-        connection.close()
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+
+
 
 #CAMBIARE PASSWORD
 @bp.route('/edit_password', methods=['POST'])
 def edit_password():
     data = request.get_json()
     if not data:
-       
-        return jsonify({'status': 'ERROR'})
+        return jsonify({'status': 'ERROR', 'message': 'No data provided'})
 
-    user_id = data.get('id')
+    user_id = data.get('user_id')
     if not user_id:
-     
-        return jsonify({'status': 'ERROR'})
+        return jsonify({'status': 'ERROR', 'message': 'No user_id provided'})
 
     new_password = data.get('password')
-    
+    if not new_password:
+        return jsonify({'status': 'ERROR', 'message': 'No password provided'})
+
     connection = db.getdb()
+    cursor = None
     try:
         cursor = connection.cursor()
 
-        # Prepare the fields to update
-        update_fields = []
-        update_values = []
-
-        if new_password:
-            update_fields.append("password = %s")
-            update_values.append(new_password)
-        
-       
-        update_query = f"UPDATE users SET {', '.join(update_fields)} WHERE id = %s"
-        update_values.append(user_id)
-
-        cursor.execute(update_query, tuple(update_values))
+        update_query = "UPDATE users SET password = %s WHERE id = %s"
+        cursor.execute(update_query, (new_password, user_id))
         connection.commit()
 
         if cursor.rowcount == 0:
-            
-            return jsonify({'status': 'ERROR'})
+            return jsonify({'status': 'ERROR', 'message': 'No rows updated, query might be incorrect or data might not exist'})
 
         return jsonify({'status': 'SUCCESS'})
     except Exception as e:
-        connection.rollback()
-        return jsonify({'status': 'ERROR'})
+        if connection:
+            connection.rollback()
+        return jsonify({'status': 'ERROR', 'message': str(e)})
     finally:
-        cursor.close()
-        connection.close()
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
 
 
 #PER CARICARE LE IMMAGINI DEL PROFILO NELL'APP
@@ -884,7 +883,7 @@ def select_seats_and_buy_tickets():
     selected_seats = data.get('selected_seats')
 
     if not all([user_id, film_id, theater_id, screening_date, screening_time, selected_seats]):
-        return jsonify({'status': 'ERROR', 'message': 'Missing required data'})
+        return jsonify({'status': 'PURCHASE_FAIL', 'message': 'Missing required data'})
 
     connection = db.getdb()
     cursor = connection.cursor(dictionary=True)
@@ -892,16 +891,15 @@ def select_seats_and_buy_tickets():
     try:
         connection.start_transaction()
 
-        # Controllo se il teatro è pieno
         cursor.execute("SELECT seat_count, available, is_full FROM theater WHERE id = %s", (theater_id,))
         theater = cursor.fetchone()
         if not theater:
-            return jsonify({'status': 'ERROR', 'message': 'Theater not found'})
+            return jsonify({'status': 'PURCHASE_FAIL', 'message': 'Theater not found'})
 
         if theater['is_full']:
-            return jsonify({'status': 'ERROR', 'message': 'Theater is fully booked'})
+            return jsonify({'status': 'PURCHASE_FAIL', 'message': 'Theater is fully booked'})
 
-        # Recupero i posti occupati attualmente per la sala selezionata
+        # Check if selected seats are already occupied
         cursor.execute("""
             SELECT s.seat_code
             FROM seat_status ss
@@ -913,7 +911,7 @@ def select_seats_and_buy_tickets():
         """, (theater_id, screening_date, screening_time))
         occupied_seats = [row['seat_code'] for row in cursor.fetchall()]
 
-        # Verifica se ci sono posti già occupati tra quelli selezionati dall'utente
+        # Get seat IDs for selected seats
         seat_placeholders = ', '.join(['%s'] * len(selected_seats))
         cursor.execute(f"""
             SELECT id, seat_code FROM seat 
@@ -921,6 +919,7 @@ def select_seats_and_buy_tickets():
         """, (*selected_seats, theater_id))
         seat_ids = {row['seat_code']: row['id'] for row in cursor.fetchall()}
 
+        # Check if any selected seats are already occupied
         seat_ids_placeholder = ', '.join(['%s'] * len(seat_ids))
         cursor.execute(f"""
             SELECT seat_id FROM seat_status 
@@ -930,36 +929,36 @@ def select_seats_and_buy_tickets():
         occupied_seat_ids = {row['seat_id'] for row in cursor.fetchall()}
 
         if occupied_seat_ids:
-            return jsonify({'status': 'ERROR', 'message': 'Some seats are already occupied', 'occupied_seats': occupied_seats})
+            return jsonify({'status': 'PURCHASE_FAIL', 'message': 'Some seats are already occupied', 'occupied_seats': occupied_seats})
 
-        # Calcola il prezzo totale
+        # Calculate total price for the selected seats
         seat_count_total = len(selected_seats)
         ticket_price = Decimal('8.00')
         total_price = ticket_price * seat_count_total
         
-        # Verifica il saldo dell'utente
+        # Check if the user has enough balance
         cursor.execute("SELECT amount FROM balance WHERE ref_user = %s FOR UPDATE", (user_id,))
         balance_record = cursor.fetchone()
         
         if balance_record is None:
-            return jsonify({'status': 'ERROR', 'message': 'No balance record found for the user'})
+            return jsonify({'status': 'PURCHASE_FAIL', 'message': 'No balance record found for the user'})
         
         current_amount = Decimal(balance_record['amount'])
         
         if total_price > current_amount:
-            return jsonify({'status': 'ERROR', 'message': 'Insufficient balance'})
+            return jsonify({'status': 'PURCHASE_FAIL', 'message': 'Insufficient balance'})
         
-        # Deduce l'importo dal saldo dell'utente
+        # Deduct the total price from the user's balance
         new_amount = current_amount - total_price
         cursor.execute("UPDATE balance SET amount = %s WHERE ref_user = %s", (new_amount, user_id))
         
-        # Registra l'acquisto
+        # Register the purchase
         cursor.execute("""
             INSERT INTO purchases (user_id, film_id, theater_id, screening_date, screening_time, seat_count, seats)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
         """, (user_id, film_id, theater_id, screening_date, screening_time, seat_count_total, ','.join(selected_seats)))
 
-        # Aggiorna lo stato dei posti
+        # Mark the selected seats as occupied
         seat_status_updates = [(seat_id, theater_id, screening_date, screening_time) for seat_id in seat_ids.values()]
         cursor.executemany("""
             INSERT INTO seat_status (seat_id, theater_id, screening_date, screening_time, is_occupied)
@@ -967,7 +966,7 @@ def select_seats_and_buy_tickets():
             ON DUPLICATE KEY UPDATE is_occupied = TRUE
         """, seat_status_updates)
         
-        # Aggiorna la disponibilità del teatro
+        # Update the theater's available seat count
         cursor.execute("""
             UPDATE theater SET available = available - %s WHERE id = %s
         """, (seat_count_total, theater_id))
@@ -978,28 +977,36 @@ def select_seats_and_buy_tickets():
         if available_seats == 0:
             cursor.execute("UPDATE theater SET is_full = TRUE WHERE id = %s", (theater_id,))
 
-        # Aggiorna i punti dell'utente
+        # Fetch user's current points and level
         cursor.execute("SELECT level, points FROM users WHERE id = %s FOR UPDATE", (user_id,))
         user_record = cursor.fetchone()
         
         if user_record is None:
-            return jsonify({'status': 'ERROR', 'message': 'User record not found'})
+            return jsonify({'status': 'PURCHASE_FAIL', 'message': 'User record not found'})
         
         user_level = user_record['level'] or 0
         current_points = user_record['points'] or 0
         
+        # Calculate points to add, but cap at 1000
         points_to_add = (total_price * 10) + user_level
         new_points = current_points + int(points_to_add)
         
-        cursor.execute("UPDATE users SET points = %s WHERE id = %s", (new_points, user_id))
+        if new_points > 1000:
+            new_points = 1000
         
+        cursor.execute("UPDATE users SET points = %s WHERE id = %s", (new_points, user_id))
         connection.commit()
         
-        return jsonify({'status': 'SUCCESS', 'message': 'Purchase successful, seats confirmed, balance and points updated'})
-    
+        return jsonify({
+        'status': 'PURCHASE_COMPLETE',
+        'message': 'Purchase successful, seats confirmed, balance and points updated',
+        'new_points': new_points,
+        'points_to_add': int(points_to_add)
+    })    
+
     except Exception as e:
         connection.rollback()
-        return jsonify({'status': 'ERROR', 'message': f'An error occurred: {str(e)}'})
+        return jsonify({'status': 'PURCHASE_FAIL', 'message': f'An error occurred: {str(e)}'})
     
     finally:
         cursor.close()
@@ -1443,7 +1450,6 @@ def films_by_category():
     finally:
         cursor.close()
         connection.close()
-
 
 
 
@@ -2136,6 +2142,51 @@ def get_rewards():
         connection.close()
 
 
+
+#PER OTTENERE IL NUMERO TOTALE DI 'free_ticket' E 'ticket_discount' POSSEDUTI DA UN UTENTE
+@bp.route('/get_all_rewards', methods=['POST'])
+def get_all_rewards():
+    data = request.get_json()
+    user_id = data.get('user_id')
+
+    if not user_id:
+        return jsonify({'status': 'ERROR', 'message': 'User ID is required'})
+
+    connection = db.getdb()
+    cursor = connection.cursor(dictionary=True)
+
+    try:
+        # Retrieve user rewards
+        cursor.execute("""
+            SELECT free_ticket_count, ticket_discounts
+            FROM users
+            WHERE id = %s
+        """, (user_id,))
+        
+        user_record = cursor.fetchone()
+        
+        if user_record is None:
+            return jsonify({'status': 'ERROR', 'message': 'User record not found'})
+        
+        # Extract reward counts
+        free_ticket_count = user_record['free_ticket_count']
+        ticket_discounts = user_record['ticket_discounts']
+
+        return jsonify({
+            'status': 'SUCCESS',
+            'free_ticket_count': free_ticket_count,
+            'ticket_discounts': ticket_discounts
+        })
+
+    except Exception as e:
+        return jsonify({'status': 'ERROR', 'message': str(e)})
+
+    finally:
+        cursor.close()
+        connection.close()
+
+
+
 #APPLICARE/USARE UNO SCONTO TRA  'free_ticket' O 'ticket_discount'
 @bp.route('/use_reward', methods=['POST'])
 def use_reward():
@@ -2186,5 +2237,4 @@ def use_reward():
         cursor.close()
         connection.close()
         
-
 
