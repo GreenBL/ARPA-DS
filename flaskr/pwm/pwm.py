@@ -26,6 +26,20 @@ bp = Blueprint('pwm', __name__, url_prefix='/pwm')
 bcrypt = Bcrypt()
 
 
+@bp.route('/ping', methods=['GET'])
+def ping():
+    try:
+        # Attempt to get the database connection
+        connection = db.getdb()
+        cursor = connection.cursor()
+        cursor.execute("SELECT 1")  # A simple query to check if the database is reachable
+        cursor.fetchone()  # Fetch the result to confirm the query was executed
+        return jsonify({"message": "Database is up"}), 200
+    except mysql.connector.Error as err:
+        # Handle database connection error
+        return jsonify({"error": "Database connection failed", "details": str(err)}), 500
+
+
 @bp.route('/login', methods=['POST'])
 def login():
     email = request.json.get('email')
@@ -839,13 +853,12 @@ def occupied_seats():
     screening_time = data.get('screening_time')
 
     if not all([theater_id, screening_date, screening_time]):
-        return jsonify({'status': 'ERROR', 'message': 'Theater ID, screening date, and screening time are required'})
+        return jsonify({'status': 'ERROR', 'message': 'Theater ID, screening date, and screening time are required'}), 400
 
-    connection = db.getdb()
+    connection = db.getdb() 
     try:
-        cursor = connection.cursor(dictionary=True)  
+        cursor = connection.cursor(dictionary=True)
 
-        # Query to fetch occupied seats for the specified theater, date, and time
         query = """
             SELECT s.seat_code
             FROM seat_status ss
@@ -858,16 +871,17 @@ def occupied_seats():
         cursor.execute(query, (theater_id, screening_date, screening_time))
         occupied_seats = cursor.fetchall()
 
-        # Format the result
+    
         occupied_seats_list = [row['seat_code'] for row in occupied_seats]
 
-        return jsonify({'status': 'SUCCESS', 'Occupied seats:': occupied_seats_list})
+        return jsonify({'status': 'SUCCESS', 'occupied_seats': occupied_seats_list})
     except Exception as e:
         connection.rollback()
         return jsonify({'status': 'ERROR', 'message': str(e)})
     finally:
         cursor.close()
         connection.close()
+
 
 
 #SELEZIONARE TUTTE LE INFO CHE COMPORRANNO UN BIGLIETTO E ACQUISTARLO
