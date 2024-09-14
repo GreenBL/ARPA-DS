@@ -189,17 +189,6 @@ def add_security_question_and_answer():
     cursor = connection.cursor()
 
     try:
-        # Check if the user already has a security question and answer set
-        cursor.execute("""
-            SELECT security_question, security_answer 
-            FROM users 
-            WHERE id = %s
-        """, (user_id,))
-        result = cursor.fetchone()
-
-        if result and result[0] is not None and result[1] is not None:
-            return jsonify({'status': 'ERROR', 'message': 'Security Q&A already set'})
-
         # Update the security_question and security_answer in the database
         cursor.execute("""
             UPDATE users 
@@ -218,94 +207,13 @@ def add_security_question_and_answer():
 
     except Exception as e:
         connection.rollback()
-        return jsonify({'status': 'ERROR', 'message': 'Error occurred'})
+        return jsonify({'status': 'ERROR', 'message': 'Error occurred: ' + str(e)})
 
     finally:
         cursor.close()
         connection.close()
 
 
-
-#RIMUOVERE LA DOMANDA E RISPOSTA DI SICUREZZA
-@bp.route('/remove_security_question_and_answer', methods=['POST'])
-def remove_security_question_and_answer():
-    data = request.get_json()
-    user_id = data.get('user_id')
-
-    if not user_id:
-        return jsonify({'status': 'ERROR', 'message': 'User ID is required'})
-
-    connection = db.getdb()
-    cursor = connection.cursor()
-
-    try:
-        # Update security_question and security_answer to NULL in the database
-        cursor.execute("""
-            UPDATE users 
-            SET security_question = NULL, security_answer = NULL 
-            WHERE id = %s
-        """, (user_id,))
-
-        # Commit the changes
-        connection.commit()
-
-        # Check if the update was successful
-        if cursor.rowcount == 0:
-            return jsonify({'status': 'ERROR', 'message': 'User not found or no change made'})
-
-        return jsonify({'status': 'SUCCESS', 'message': 'Security question and answer removed successfully'})
-
-    except Exception as e:
-        connection.rollback()
-        return jsonify({'status': 'ERROR', 'message': f'An error occurred: {str(e)}'})
-
-    finally:
-        cursor.close()
-        connection.close()
-
-
-#AGGIORNARE DOMANDA E RISPOSTA DI SICUREZZA
-@bp.route('/update_security_question_and_answer', methods=['POST'])
-def update_security_question_and_answer():
-    data = request.get_json()
-    user_id = data.get('user_id')
-    new_security_question = data.get('security_question')
-    new_security_answer = data.get('security_answer')
-
-    # Validate the input data
-    if user_id is None or new_security_question is None or new_security_answer is None:
-        return jsonify({'status': 'ERROR', 'message': 'User ID, question, and answer are required'})
-
-    if not (0 <= new_security_question <= 5):
-        return jsonify({'status': 'ERROR', 'message': 'Question must be 0-5'})
-
-    connection = db.getdb()
-    cursor = connection.cursor()
-
-    try:
-        # Update the security_question and security_answer in the database
-        cursor.execute("""
-            UPDATE users 
-            SET security_question = %s, security_answer = %s 
-            WHERE id = %s
-        """, (new_security_question, new_security_answer, user_id))
-
-        # Commit the changes
-        connection.commit()
-
-        # Check if the update was successful
-        if cursor.rowcount == 0:
-            return jsonify({'status': 'ERROR', 'message': 'User not found or no change made'})
-
-        return jsonify({'status': 'SUCCESS', 'message': 'Security question and answer updated successfully'})
-
-    except Exception as e:
-        connection.rollback()
-        return jsonify({'status': 'ERROR', 'message': f'An error occurred: {str(e)}'})
-
-    finally:
-        cursor.close()
-        connection.close()
 
 
 #VERIFICARE SE UN UTENTE HA MESSO LA DOMANDA DI SICUREZZA
@@ -1959,15 +1867,12 @@ def select_combo_and_buy_item():
         connection.close()
 
 
-
-
-
-#PER OTTENERE LE INFO DEL SINGOLO PREMIO ACQUISTATO 
+#PER RESTITUIRE LE INFO DI UN DETERMNATO PREMIO ACQUISTATO 
 @bp.route('/get_item_info', methods=['POST'])
 def get_item_info():
     data = request.get_json()
     user_id = data.get('user_id')
-    record_id = data.get('record_id')  
+    record_id = data.get('record_id')
 
     if not all([user_id, record_id]):
         return jsonify({'status': 'ERROR', 'message': 'User ID and Record ID are required'})
@@ -1979,7 +1884,7 @@ def get_item_info():
         cursor.execute("""
             SELECT item_type, category, size, menu, description, price_points 
             FROM points_redeemed 
-            WHERE user_id = %s AND id = %s AND paid = TRUE
+            WHERE user_id = %s AND id = %s
         """, (user_id, record_id))
         
         record = cursor.fetchone()
@@ -1987,22 +1892,11 @@ def get_item_info():
         if not record:
             return jsonify({'status': 'ERROR', 'message': 'No purchased item found or item not paid'})
 
-        
         item_info = {key: value for key, value in record.items() if value is not None}
-
-        # Generate QR Code
-        qr_data = '\n'.join([f"{key.replace('_', ' ').title()}: {value}" for key, value in item_info.items()])
-        img_buffer = generate_qr_code(qr_data)
-        
-        # Save QR code image to a temporary file
-        img_path = 'item_qr_code.png'
-        with open(img_path, 'wb') as f:
-            f.write(img_buffer.getvalue())
 
         return jsonify({
             'status': 'SUCCESS',
-            'item_info': item_info,
-            'qr_code_url': f'/download_qr_code/{record_id}'  
+            'item_info': item_info
         })
 
     except Exception as e:
@@ -2012,20 +1906,62 @@ def get_item_info():
         cursor.close()
         connection.close()
 
-def generate_qr_code(data):
-    qr = qrcode.QRCode(
-        version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_L,
-        box_size=10,
-        border=4,
-    )
-    qr.add_data(data)
-    qr.make(fit=True)
-    img = qr.make_image(fill_color="black", back_color="white")
-    img_buffer = io.BytesIO()
-    img.save(img_buffer, format='PNG')
-    img_buffer.seek(0)
-    return img_buffer
+
+#PER OTTENERE QRCODE DI UN DETERMNATO PREMIO ACQUISTATO
+@bp.route('/get_qrcode_item', methods=['POST'])
+def get_qrcode_item():
+    data = request.get_json()
+    user_id = data.get('user_id')
+    record_id = data.get('record_id')
+
+    if not all([user_id, record_id]):
+        return jsonify({'status': 'ERROR', 'message': 'User ID and Record ID are required'})
+
+    connection = db.getdb()
+    cursor = connection.cursor(dictionary=True)
+
+    try:
+        cursor.execute("""
+            SELECT item_type, category, size, menu, description, price_points 
+            FROM points_redeemed 
+            WHERE user_id = %s AND id = %s
+        """, (user_id, record_id))
+        
+        record = cursor.fetchone()
+        
+        if not record:
+            return jsonify({'status': 'ERROR', 'message': 'No item found for the given user and record ID'})
+
+        item_info = {key: value for key, value in record.items() if value is not None}
+
+        # Generate QR Code
+        qr_data = '\n'.join([f"{key.replace('_', ' ').title()}: {value}" for key, value in item_info.items()])
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=3,
+            border=2,
+        )
+        qr.add_data(qr_data)
+        qr.make(fit=True)
+        
+        # Create an image from the QR code
+        img = qr.make_image(fill='black', back_color='white')
+        
+        # Save the image to a BytesIO object
+        img_io = io.BytesIO()
+        img.save(img_io, 'PNG')
+        img_io.seek(0)
+
+        # Send the QR code image directly as a response
+        return send_file(img_io, mimetype='image/png')
+
+    except Exception as e:
+        return jsonify({'status': 'ERROR', 'message': str(e)})
+
+    finally:
+        cursor.close()
+        connection.close()
 
 
 
