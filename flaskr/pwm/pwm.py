@@ -29,15 +29,14 @@ bcrypt = Bcrypt()
 @bp.route('/ping', methods=['GET'])
 def ping():
     try:
-        # Attempt to get the database connection
         connection = db.getdb()
         cursor = connection.cursor()
         cursor.execute("SELECT 1")  # A simple query to check if the database is reachable
-        cursor.fetchone()  # Fetch the result to confirm the query was executed
-        return jsonify({"message": "Database is up"}), 200
+        cursor.fetchone()  
+        return jsonify({"message": "Database is up"})
     except mysql.connector.Error as err:
-        # Handle database connection error
-        return jsonify({"error": "Database connection failed", "details": str(err)}), 500
+       
+        return jsonify({"error": "Database connection failed", "details": str(err)})
 
 
 @bp.route('/login', methods=['POST'])
@@ -596,7 +595,6 @@ def edit_email():
         update_query = f"UPDATE users SET {', '.join(update_fields)} WHERE id = %s"
         update_values.append(user_id)
 
-        print(f'Executing Query: {update_query} with values {tuple(update_values)}')
         cursor.execute(update_query, tuple(update_values))
         connection.commit()
 
@@ -895,9 +893,13 @@ def select_seats_and_buy_tickets():
     screening_date = data.get('screening_date')
     screening_time = data.get('screening_time')
     selected_seats = data.get('selected_seats')
+    reward_type = data.get('reward_type')  #Devi scegliere tra STANDARD, FREE, DISCOUNT
 
-    if not all([user_id, film_id, theater_id, screening_date, screening_time, selected_seats]):
+    if not all([user_id, film_id, theater_id, screening_date, screening_time, selected_seats, reward_type]):
         return jsonify({'status': 'PURCHASE_FAIL', 'message': 'Missing required data'})
+
+    if reward_type not in ['STANDARD', 'FREE', 'DISCOUNT']:
+        return jsonify({'status': 'PURCHASE_FAIL', 'message': 'Invalid reward type'})
 
     connection = db.getdb()
     cursor = connection.cursor(dictionary=True)
@@ -905,6 +907,7 @@ def select_seats_and_buy_tickets():
     try:
         connection.start_transaction()
 
+        # Controllo disponibilità teatro e posti
         cursor.execute("SELECT seat_count, available, is_full FROM theater WHERE id = %s", (theater_id,))
         theater = cursor.fetchone()
         if not theater:
@@ -913,7 +916,7 @@ def select_seats_and_buy_tickets():
         if theater['is_full']:
             return jsonify({'status': 'PURCHASE_FAIL', 'message': 'Theater is fully booked'})
 
-        # Check if selected seats are already occupied
+        # Controllo dei posti occupati
         cursor.execute("""
             SELECT s.seat_code
             FROM seat_status ss
@@ -925,7 +928,7 @@ def select_seats_and_buy_tickets():
         """, (theater_id, screening_date, screening_time))
         occupied_seats = [row['seat_code'] for row in cursor.fetchall()]
 
-        # Get seat IDs for selected seats
+        # Ottieni gli ID dei posti selezionati
         seat_placeholders = ', '.join(['%s'] * len(selected_seats))
         cursor.execute(f"""
             SELECT id, seat_code FROM seat 
@@ -933,7 +936,7 @@ def select_seats_and_buy_tickets():
         """, (*selected_seats, theater_id))
         seat_ids = {row['seat_code']: row['id'] for row in cursor.fetchall()}
 
-        # Check if any selected seats are already occupied
+        # Controllo se i posti selezionati sono già occupati
         seat_ids_placeholder = ', '.join(['%s'] * len(seat_ids))
         cursor.execute(f"""
             SELECT seat_id FROM seat_status 
@@ -945,86 +948,101 @@ def select_seats_and_buy_tickets():
         if occupied_seat_ids:
             return jsonify({'status': 'PURCHASE_FAIL', 'message': 'Some seats are already occupied', 'occupied_seats': occupied_seats})
 
-        # Calculate total price for the selected seats
+        # Calcola il prezzo totale in base al tipo di reward
         seat_count_total = len(selected_seats)
         ticket_price = Decimal('8.00')
         total_price = ticket_price * seat_count_total
-        
-        # Check if the user has enough balance
+
+        # Applica lo sconto selezionato
+        if reward_type == 'FREE':
+            total_price -= Decimal('8.00')  
+        elif reward_type == 'DISCOUNT':
+            total_price -= Decimal('4.00') 
+
+        # Controlla il saldo dell'utente
         cursor.execute("SELECT amount FROM balance WHERE ref_user = %s FOR UPDATE", (user_id,))
         balance_record = cursor.fetchone()
-        
+
         if balance_record is None:
             return jsonify({'status': 'PURCHASE_FAIL', 'message': 'No balance record found for the user'})
-        
+
         current_amount = Decimal(balance_record['amount'])
-        
+
         if total_price > current_amount:
             return jsonify({'status': 'PURCHASE_FAIL', 'message': 'Insufficient balance'})
-        
-        # Deduct the total price from the user's balance
+
+        # Deduci il totale dal saldo dell'utente
         new_amount = current_amount - total_price
         cursor.execute("UPDATE balance SET amount = %s WHERE ref_user = %s", (new_amount, user_id))
-        
-        # Register the purchase
+
+        # Registra l'acquisto
         cursor.execute("""
             INSERT INTO purchases (user_id, film_id, theater_id, screening_date, screening_time, seat_count, seats)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
         """, (user_id, film_id, theater_id, screening_date, screening_time, seat_count_total, ','.join(selected_seats)))
 
-        # Mark the selected seats as occupied
+        # Marca i posti come occupati
         seat_status_updates = [(seat_id, theater_id, screening_date, screening_time) for seat_id in seat_ids.values()]
         cursor.executemany("""
             INSERT INTO seat_status (seat_id, theater_id, screening_date, screening_time, is_occupied)
             VALUES (%s, %s, %s, %s, TRUE)
             ON DUPLICATE KEY UPDATE is_occupied = TRUE
         """, seat_status_updates)
-        
-        # Update the theater's available seat count
+
+        # Aggiorna i posti disponibili del teatro
         cursor.execute("""
             UPDATE theater SET available = available - %s WHERE id = %s
         """, (seat_count_total, theater_id))
-        
+
         cursor.execute("SELECT available FROM theater WHERE id = %s", (theater_id,))
         available_seats = cursor.fetchone()['available']
 
         if available_seats == 0:
             cursor.execute("UPDATE theater SET is_full = TRUE WHERE id = %s", (theater_id,))
 
-        # Fetch user's current points and level
-        cursor.execute("SELECT level, points FROM users WHERE id = %s FOR UPDATE", (user_id,))
+        # Aggiorna i punti e livello utente
+        cursor.execute("SELECT level, points, free_ticket_count, ticket_discounts FROM users WHERE id = %s FOR UPDATE", (user_id,))
         user_record = cursor.fetchone()
-        
+
         if user_record is None:
             return jsonify({'status': 'PURCHASE_FAIL', 'message': 'User record not found'})
-        
+
         user_level = user_record['level'] or 0
         current_points = user_record['points'] or 0
-        
-        # Calculate points to add, but cap at 1000
+
+        # Calcola i punti da aggiungere, ma cap a 1000
         points_to_add = (total_price * 10) + user_level
         new_points = current_points + int(points_to_add)
-        
+
         if new_points > 1000:
             new_points = 1000
-        
+
         cursor.execute("UPDATE users SET points = %s WHERE id = %s", (new_points, user_id))
+
+        # Gestione del tipo di reward
+        if reward_type == 'FREE':
+            cursor.execute("UPDATE users SET free_ticket_count = free_ticket_count - 1 WHERE id = %s", (user_id,))
+        elif reward_type == 'DISCOUNT':
+            cursor.execute("UPDATE users SET ticket_discounts = ticket_discounts - 1 WHERE id = %s", (user_id,))
+
         connection.commit()
-        
+
         return jsonify({
-        'status': 'PURCHASE_COMPLETE',
-        'message': 'Purchase successful, seats confirmed, balance and points updated',
-        'new_points': new_points,
-        'points_to_add': int(points_to_add)
-    })    
+            'status': 'PURCHASE_COMPLETE',
+            'message': 'Purchase successful, seats confirmed, balance and points updated',
+            'new_points': new_points,
+            'points_to_add': int(points_to_add)
+        })
 
     except Exception as e:
         connection.rollback()
         return jsonify({'status': 'PURCHASE_FAIL', 'message': f'An error occurred: {str(e)}'})
-    
+
     finally:
         cursor.close()
         connection.close()
+
+
 
 
 
@@ -2200,55 +2218,4 @@ def get_all_rewards():
         connection.close()
 
 
-
-#APPLICARE/USARE UNO SCONTO TRA  'free_ticket' O 'ticket_discount'
-@bp.route('/use_reward', methods=['POST'])
-def use_reward():
-    data = request.get_json()
-    user_id = data.get('user_id')
-    reward_type = data.get('reward_type')  # Should be either 'free_ticket' or 'ticket_discount'
-
-    if not all([user_id, reward_type]):
-        return jsonify({'status': 'ERROR', 'message': 'User ID and reward type are required'})
-
-    if reward_type not in ['free_ticket', 'ticket_discount']:
-        return jsonify({'status': 'ERROR', 'message': 'Invalid reward type'})
-
-    connection = db.getdb()
-    cursor = connection.cursor(dictionary=True)
-
-    try:
-        connection.start_transaction()
-
-        # Retrieve user rewards
-        cursor.execute("SELECT free_ticket_count, ticket_discounts FROM users WHERE id = %s FOR UPDATE", (user_id,))
-        user_record = cursor.fetchone()
-
-        if user_record is None:
-            return jsonify({'status': 'ERROR', 'message': 'User record not found'})
-
-        # Check and update reward based on the type
-        if reward_type == 'free_ticket':
-            if user_record['free_ticket_count'] <= 0:
-                return jsonify({'status': 'ERROR', 'message': 'No free tickets available'})
-            # Decrement the free_ticket_count
-            cursor.execute("UPDATE users SET free_ticket_count = free_ticket_count - 1 WHERE id = %s", (user_id,))
-        elif reward_type == 'ticket_discount':
-            if user_record['ticket_discounts'] <= 0:
-                return jsonify({'status': 'ERROR', 'message': 'No ticket discounts available'})
-            # Decrement the ticket_discounts
-            cursor.execute("UPDATE users SET ticket_discounts = ticket_discounts - 1 WHERE id = %s", (user_id,))
-
-        connection.commit()
-
-        return jsonify({'status': 'SUCCESS', 'message': f'{reward_type.replace("_", " ").title()} successfully used'})
-
-    except Exception as e:
-        connection.rollback()
-        return jsonify({'status': 'ERROR', 'message': str(e)})
-
-    finally:
-        cursor.close()
-        connection.close()
-        
 
