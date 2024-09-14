@@ -681,6 +681,7 @@ def associate_image():
         image_id = data.get('image_id')
 
         if not user_id or not image_id:
+            print("lol")
             return jsonify({'status': 'ERROR'})
 
         connection = db.getdb()  # Connect to the database
@@ -703,6 +704,7 @@ def associate_image():
 
     except Exception as e:
         connection.rollback()
+        print(e)
         return jsonify({'status': 'ERROR', 'message': str(e)})
 
     finally:
@@ -861,7 +863,7 @@ def occupied_seats():
         # Format the result
         occupied_seats_list = [row['seat_code'] for row in occupied_seats]
 
-        return jsonify({'status': 'SUCCESS', 'Occupied seats:': occupied_seats_list})
+        return jsonify({'status': 'SUCCESS', 'occupied_seats': occupied_seats_list})
     except Exception as e:
         connection.rollback()
         return jsonify({'status': 'ERROR', 'message': str(e)})
