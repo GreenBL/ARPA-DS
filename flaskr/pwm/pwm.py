@@ -1965,6 +1965,41 @@ def get_qrcode_item():
 
 
 
+#QRCODE DI UN DETERMNATO PREMIO
+@bp.route('/get_qr', methods=['GET'])
+def get_qr():
+    data = request.args.get('data')
+
+    if not data:
+        return jsonify({'status': 'ERROR', 'message': 'Data query parameter is required'})
+
+    try:
+        # Generate QR Code
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=3,
+            border=2,
+        )
+        qr.add_data(data)
+        qr.make(fit=True)
+        
+        # Create an image from the QR code
+        img = qr.make_image(fill='black', back_color='white')
+        
+        # Save the image to a BytesIO object
+        img_io = io.BytesIO()
+        img.save(img_io, 'PNG')
+        img_io.seek(0)
+
+        # Send the QR code image directly as a response
+        return send_file(img_io, mimetype='image/png')
+
+    except Exception as e:
+        return jsonify({'status': 'ERROR', 'message': str(e)})
+
+
+
 #OTTENERE LE INFORMAZIONI DI TUTTI I PREMI RISCATTATI DA QUELL'UTENTE 
 @bp.route('/get_items', methods=['POST'])
 def get_items():
@@ -2019,7 +2054,7 @@ def select_discounts():
     if not all([user_id, reward_type]):
         return jsonify({'status': 'ERROR', 'message': 'User ID and reward type are required'})
 
-    if reward_type not in ['free_ticket', 'ticket_discount']:
+    if reward_type not in ['free_ticket', 'ticket_discount']:  # Updated to match frontend
         return jsonify({'status': 'ERROR', 'message': 'Invalid reward type'})
 
     connection = db.getdb()
@@ -2043,14 +2078,13 @@ def select_discounts():
                 return jsonify({'status': 'ERROR', 'message': 'Insufficient points for free ticket'})
             # Update the free ticket count
             cursor.execute("UPDATE users SET free_ticket_count = free_ticket_count + 1 WHERE id = %s", (user_id,))
-        elif reward_type == 'ticket_discount':
-            if current_points < 700:
+        elif reward_type == 'ticket_discount':  # Updated from 'Sconto' to match frontend
+            if current_points < 500:
                 return jsonify({'status': 'ERROR', 'message': 'Insufficient points for ticket discount'})
             # Update the ticket discount count
             cursor.execute("UPDATE users SET ticket_discounts = ticket_discounts + 1 WHERE id = %s", (user_id,))
 
-       
-        points_to_deduct = 1000 if reward_type == 'free_ticket' else 700
+        points_to_deduct = 1000 if reward_type == 'free_ticket' else 500
         new_points = current_points - points_to_deduct
         cursor.execute("UPDATE users SET points = %s WHERE id = %s", (new_points, user_id))
 
@@ -2065,6 +2099,7 @@ def select_discounts():
     finally:
         cursor.close()
         connection.close()
+
 
 
 #PER OTTENERE IL NUMERO DI  'free_ticket' O 'ticket_discount' POSSEDUTI DA UN UTENTE
